@@ -20,7 +20,11 @@ import type {
   Station,
   StreamDeckRouteTask,
 } from "../shared/domain.ts";
-import { STATIONS, UF8_CONTROL_LABELS } from "../shared/domain.ts";
+import {
+  STATIONS,
+  UF8_CONTROL_LABELS,
+  UF8_ZERO_FADER_STOP,
+} from "../shared/domain.ts";
 import type {
   ActivityItem,
   ClientMessage,
@@ -76,6 +80,7 @@ const uf8 = new Uf8Runtime({
         break;
       case "connected":
         addActivity(`UF8 direct link ready · ${state.serial}`, "success");
+        uf8.moveFadersTo(UF8_ZERO_FADER_STOP.value);
         syncUf8Display();
         break;
     }
@@ -282,7 +287,7 @@ function startCountdown(socket: Bun.ServerWebSocket<SocketData>): void {
     return;
   }
   game = { kind: "countdown", endsAt: Date.now() + 3_000, stations };
-  uf8.zeroFaders();
+  uf8.moveFadersTo(UF8_ZERO_FADER_STOP.value);
   addActivity(`${stations.length}-crew mission begins in three`, "neutral");
   broadcastSnapshots();
 }

@@ -7,6 +7,7 @@ import {
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
   setUf8FaderPosition,
+  uf8FaderPositionFromPercent,
   Uf8FrameDecoder,
 } from "./protocol.ts";
 
@@ -92,6 +93,9 @@ describe("UF8 serial protocol", () => {
     expect(setUf8FaderMotorEnabled(7, true)).toEqual(
       new Uint8Array([0xff, 29, 2, 7, 1, 39]),
     );
+    expect(uf8FaderPositionFromPercent(0)).toBe(0);
+    expect(uf8FaderPositionFromPercent(75)).toBe(24_575);
+    expect(uf8FaderPositionFromPercent(100)).toBe(32_767);
   });
 
   test("rejects drawing outside a physical UF8 display", () => {

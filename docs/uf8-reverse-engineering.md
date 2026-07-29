@@ -81,8 +81,9 @@ FADER_INDEX ENABLED_BOOL
 ```
 
 The recovered range is `0` through `32767`. The standalone zeroing probe writes
-position zero to all eight faders, enables the motors for 650 ms, then disables
-them again.
+the normalized printed `0 dB` position (`75%`, raw `24575`) to all eight
+faders, enables the motors for 650 ms, then disables them again. Raw position
+zero is the physical `-INF` endpoint, not audio unity.
 
 Native fader-position input uses code `33`:
 

@@ -36,10 +36,12 @@ export const UF8_CONTROL_LABELS = [
   "RESONANCE",
 ] as const;
 
+export const UF8_ZERO_FADER_STOP = { label: "0 DB", value: 75 } as const;
+
 export const UF8_FADER_STOPS = [
   { label: "+12 DB", value: 100 },
   { label: "+6 DB", value: 86 },
-  { label: "0 DB", value: 75 },
+  UF8_ZERO_FADER_STOP,
   { label: "-5 DB", value: 67 },
   { label: "-10 DB", value: 58 },
   { label: "-20 DB", value: 44 },

@@ -38,7 +38,7 @@ The eight motorized faders are continuous system levels. The first MVP task asks
 the operator to move a named channel to one of the physical printed dB stops and
 hold it there. The Bun server owns the direct USB session, draws every control
 name and active target on the strip displays, receives native fader events, and
-zeros the motor bank at mission start.
+parks the motor bank at the printed `0 dB` point at mission start.
 
 ### Ableton Push: navigation and sensors
 

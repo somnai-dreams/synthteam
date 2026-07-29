@@ -48,8 +48,9 @@ the routing cycle when it joins before launch.
 
 The server performs the UF8 identity, firmware, switch-chain, and display
 handshake; maintains the controller watchdog; owns all eight displays; receives
-native 15-bit fader events; and drives the fader motors. It zeros the bank when
-the bridge connects and at the start of each mission.
+native 15-bit fader events; and drives the fader motors. It parks the bank at
+the printed `0 dB` point when the bridge connects and at the start of each
+mission.
 
 UF8 orders use the labels printed beside the physical faders:
 `+12`, `+6`, `0`, `-5`, `-10`, `-20`, `-30`, `-40`, `-60`, and `-INF`.
@@ -142,7 +143,7 @@ generation without opening the controller.
 The central laptop detects the connected Stream Deck XL and SSL UF8 over USB.
 The Stream Deck plugin and server-owned UF8 transport have both reached the
 authoritative mission loop. A live two-phone pass confirmed UF8 connection,
-native fader input, motor zeroing, custom strip labels, printed-dB targets, and
+native fader input, motor parking, custom strip labels, printed-dB targets, and
 task completion.
 
 The remaining physical gates are:

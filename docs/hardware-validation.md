@@ -53,9 +53,9 @@ core. Inspection of the locally installed runtime established:
 - motor position and enable commands for all eight faders.
 
 Synthteam now has a Bun probe that can generate the recovered packets, draw a
-colour-coded label test, and move all faders to zero. Direct hardware execution
-requires pausing SSL 360 because its core owns the same USB interface
-exclusively.
+colour-coded label test, and move all faders to the raw-zero (`-INF`) endpoint.
+Direct hardware execution requires pausing SSL 360 because its core owns the
+same USB interface exclusively.
 
 See [`uf8-reverse-engineering.md`](./uf8-reverse-engineering.md) for the exact
 evidence boundary and reproduction commands.
@@ -71,7 +71,8 @@ attached UF8 while SSL 360 was stopped:
 - the web console reported the attached serial as **DIRECT LINK**;
 - the native input monitor received the initial fader bank at normalized
   positions `67, 70, 28, 28, 4, 48, 2, 20`;
-- server motor commands moved all eight faders to approximately `1%`;
+- the first server motor pass moved all eight faders to approximately `1%`
+  while raw zero still represented the physical `-INF` endpoint;
 - a two-phone mission delivered `SET HULL SHEAR TO -40 DB` to the remote
   reader and the same control/target to the UF8 display;
 - holding the normalized `-40 DB` stop completed a UF8 task for 100 points.
@@ -79,3 +80,6 @@ attached UF8 while SSL 360 was stopped:
 The remaining hardware gates are the exported Stream Deck profile, identifying
 and integrating the disconnected Push, and completing a full 90-second
 no-simulator mission.
+
+Follow-up corrected the reset target to the surface's printed `0 dB` point:
+normalized `75%`, raw protocol position `24575`.

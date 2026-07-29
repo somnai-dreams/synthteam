@@ -203,6 +203,13 @@ export function setUf8FaderPosition(
   ]);
 }
 
+export function uf8FaderPositionFromPercent(percent: number): number {
+  if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+    throw new RangeError("UF8 fader percent must be from 0 to 100");
+  }
+  return Math.round((percent / 100) * 32_767);
+}
+
 export function setUf8FaderMotorEnabled(
   faderIndex: number,
   enabled: boolean,

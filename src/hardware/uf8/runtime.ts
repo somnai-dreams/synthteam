@@ -10,6 +10,7 @@ import {
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
   setUf8FaderPosition,
+  uf8FaderPositionFromPercent,
   type Uf8Message,
   UF8_DISPLAY_COUNT,
   UF8_DISPLAY_HEIGHT,
@@ -82,13 +83,14 @@ export class Uf8Runtime {
     this.#runPromise = null;
   }
 
-  zeroFaders(): void {
+  moveFadersTo(percent: number): void {
+    const position = uf8FaderPositionFromPercent(percent);
     const session = this.#session;
     if (session === null) {
       return;
     }
     for (let index = 0; index < UF8_FADER_COUNT; index += 1) {
-      session.write(setUf8FaderPosition(index, 0));
+      session.write(setUf8FaderPosition(index, position));
     }
     for (let index = 0; index < UF8_FADER_COUNT; index += 1) {
       session.write(setUf8FaderMotorEnabled(index, true));
@@ -136,7 +138,6 @@ export class Uf8Runtime {
         this.#session = session;
         this.#lastDisplaySignature = "";
         this.#setState({ kind: "connected", serial: session.serial });
-        this.zeroFaders();
 
         while (!this.#stopping && this.#session === session) {
           this.#pumpSession(session);

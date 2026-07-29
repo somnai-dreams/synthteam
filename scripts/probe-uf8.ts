@@ -6,12 +6,14 @@ import {
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
   setUf8FaderPosition,
+  uf8FaderPositionFromPercent,
   UF8_DISPLAY_COUNT,
   UF8_DISPLAY_HEIGHT,
   UF8_DISPLAY_WIDTH,
   UF8_FADER_COUNT,
 } from "../src/hardware/uf8/protocol.ts";
 import { Uf8Session } from "../src/hardware/uf8/session.ts";
+import { UF8_ZERO_FADER_STOP } from "../src/shared/domain.ts";
 
 type Command = "list" | "preview" | "display-test" | "zero-faders";
 
@@ -186,8 +188,11 @@ function displayTestFrames(displayIndex: number): readonly Uint8Array[] {
 }
 
 async function zeroFaders(session: Uf8Session): Promise<void> {
+  const zeroPosition = uf8FaderPositionFromPercent(
+    UF8_ZERO_FADER_STOP.value,
+  );
   for (let faderIndex = 0; faderIndex < UF8_FADER_COUNT; faderIndex += 1) {
-    session.write(setUf8FaderPosition(faderIndex, 0));
+    session.write(setUf8FaderPosition(faderIndex, zeroPosition));
   }
   for (let faderIndex = 0; faderIndex < UF8_FADER_COUNT; faderIndex += 1) {
     session.write(setUf8FaderMotorEnabled(faderIndex, true));
@@ -204,7 +209,7 @@ async function zeroFaders(session: Uf8Session): Promise<void> {
   for (let faderIndex = 0; faderIndex < UF8_FADER_COUNT; faderIndex += 1) {
     session.write(setUf8FaderMotorEnabled(faderIndex, false));
   }
-  console.log("Moved all eight faders to zero and disabled their motors");
+  console.log("Moved all eight faders to the printed 0 dB point");
 }
 
 function parseCommand(value: string | undefined): Command {
