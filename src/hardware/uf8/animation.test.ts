@@ -2,53 +2,125 @@ import { describe, expect, test } from "bun:test";
 import { Uf8FrameDecoder } from "./protocol.ts";
 import {
   createUf8AnimationFrames,
-  createUf8AnimationResetFrames,
   UF8_ANIMATION_INTERVAL_MS,
+  type Uf8AnimationStrip,
 } from "./animation.ts";
 
-describe("UF8 display animation", () => {
-  test("draws one track per display before animation begins", () => {
-    const frames = createUf8AnimationResetFrames();
-    const decoder = new Uf8FrameDecoder();
-    const messages = frames.flatMap((frame) => decoder.push(frame));
+const emptyStrips: readonly Uf8AnimationStrip[] = Array.from(
+  { length: 8 },
+  () => ({ cue: null }),
+);
 
-    expect(UF8_ANIMATION_INTERVAL_MS).toBe(125);
-    expect(frames).toHaveLength(8);
-    expect(messages).toHaveLength(8);
-    for (let displayIndex = 0; displayIndex < 8; displayIndex += 1) {
-      const track = messages[displayIndex];
-      expect(track?.payload.slice(0, 6)).toEqual(
-        new Uint8Array([13, displayIndex, 12, 115, 142, 149]),
-      );
-    }
+describe("UF8 full-screen animation scenes", () => {
+  test("renders a full-screen attract mode with game title and motion", () => {
+    const messages = decode(
+      createUf8AnimationFrames(
+        { kind: "attract" },
+        emptyStrips,
+        2,
+        0,
+      ),
+    );
+
+    expect(UF8_ANIMATION_INTERVAL_MS).toBe(160);
+    expect(messages).toHaveLength(64);
+    expect(textFrom(messages)).toContain("SYNTH/TEAM");
+    expect(textFrom(messages)).toContain("STANDBY");
   });
 
-  test("moves one comet across all eight displays", () => {
-    const decoder = new Uf8FrameDecoder();
-    const start = createUf8AnimationFrames(0).flatMap((frame) =>
-      decoder.push(frame),
+  test("renders giant countdown digits across every display", () => {
+    const three = decode(
+      createUf8AnimationFrames(
+        { kind: "countdown", endsAt: 3_000 },
+        emptyStrips,
+        0,
+        0,
+      ),
     );
-    const nextDisplay = createUf8AnimationFrames(4).flatMap((frame) =>
-      decoder.push(frame),
+    const one = decode(
+      createUf8AnimationFrames(
+        { kind: "countdown", endsAt: 3_000 },
+        emptyStrips,
+        1,
+        2_500,
+      ),
     );
 
-    expect(start).toHaveLength(2);
-    expect(start[0]?.payload.slice(1, 6)).toEqual(
-      new Uint8Array([7, 96, 115, 142, 149]),
-    );
-    expect(start[1]?.payload.slice(1, 6)).toEqual(
-      new Uint8Array([0, 12, 31, 142, 149]),
-    );
-    expect(nextDisplay[1]?.payload.slice(1, 6)).toEqual(
-      new Uint8Array([1, 12, 31, 142, 149]),
-    );
+    expect(three).toHaveLength(64);
+    expect(one).toHaveLength(40);
   });
 
-  test("loops deterministically and rejects invalid frame indices", () => {
-    expect(createUf8AnimationFrames(32)).toEqual(
-      createUf8AnimationFrames(0),
+  test("keeps mission cues over the animated reactor field", () => {
+    const strips = emptyStrips.map((strip, index) =>
+      index === 2
+        ? { cue: { heading: "REPORT CODE", value: "BETA" } }
+        : strip,
     );
-    expect(() => createUf8AnimationFrames(-1)).toThrow(RangeError);
-    expect(() => createUf8AnimationFrames(0.5)).toThrow(RangeError);
+    const messages = decode(
+      createUf8AnimationFrames(
+        { kind: "mission", activity: "reactor-procedure" },
+        strips,
+        4,
+        0,
+      ),
+    );
+
+    expect(messages).toHaveLength(45);
+    expect(textFrom(messages)).toContain("REPORT CODE");
+    expect(textFrom(messages)).toContain("BETA");
+  });
+
+  test("renders distinct victory and hull-loss takeovers", () => {
+    const victory = decode(
+      createUf8AnimationFrames(
+        { kind: "game-over", result: "survived" },
+        emptyStrips,
+        1,
+        0,
+      ),
+    );
+    const loss = decode(
+      createUf8AnimationFrames(
+        { kind: "game-over", result: "integrity" },
+        emptyStrips,
+        1,
+        0,
+      ),
+    );
+
+    expect(textFrom(victory)).toContain("SURVIVED");
+    expect(textFrom(loss)).toContain("LOST");
+    expect(victory).not.toEqual(loss);
+  });
+
+  test("rejects malformed animation inputs", () => {
+    expect(() =>
+      createUf8AnimationFrames({ kind: "attract" }, [], 0, 0),
+    ).toThrow("exactly eight");
+    expect(() =>
+      createUf8AnimationFrames(
+        { kind: "attract" },
+        emptyStrips,
+        -1,
+        0,
+      ),
+    ).toThrow(RangeError);
   });
 });
+
+function decode(frames: readonly Uint8Array[]) {
+  const decoder = new Uf8FrameDecoder();
+  return frames.flatMap((frame) => decoder.push(frame));
+}
+
+function textFrom(
+  messages: ReturnType<typeof decode>,
+): readonly string[] {
+  return messages
+    .filter(
+      (message) =>
+        message.code === 100 &&
+        message.payload[0] === 15,
+    )
+    .map((message) => new TextDecoder().decode(message.payload.slice(6)));
+}

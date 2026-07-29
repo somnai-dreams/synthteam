@@ -40,6 +40,8 @@ the operator to move a named channel to one of the physical printed dB stops and
 hold it there. The Bun server owns the direct USB session, draws every control
 name and active target on the strip displays, receives native fader events, and
 parks the motor bank at the printed `0 dB` point at mission start.
+The display bank also acts as a synchronized game wall, switching between
+full-screen lobby, countdown, live-reactor, alert, and game-over animations.
 
 ### Ableton Push: navigation and sensors
 

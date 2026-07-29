@@ -83,3 +83,18 @@ no-simulator mission.
 
 Follow-up corrected the reset target to the surface's printed `0 dB` point:
 normalized `75%`, raw protocol position `24575`.
+
+## 2026-07-29 · full-screen UF8 scene pass
+
+The attached UF8 completed a live state-transition demo using procedural
+full-screen graphics:
+
+- lobby hyperspace attract mode;
+- giant `3–2–1` countdown digits;
+- animated live-mission reactor columns;
+- return to attract mode after mission reset.
+
+The direct link remained connected as the scene changed and while the lobby
+animation continued. The validation used two disposable local phone sockets and
+the authoritative server mission transition path rather than a display-only
+probe.

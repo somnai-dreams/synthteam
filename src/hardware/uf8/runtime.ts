@@ -19,8 +19,8 @@ import {
 } from "./protocol.ts";
 import {
   createUf8AnimationFrames,
-  createUf8AnimationResetFrames,
   UF8_ANIMATION_INTERVAL_MS,
+  type Uf8AnimationScene,
 } from "./animation.ts";
 import { Uf8Session } from "./session.ts";
 
@@ -33,6 +33,7 @@ export type Uf8DisplayStrip = {
 };
 
 export type Uf8DisplayView = {
+  scene: Uf8AnimationScene;
   strips: readonly Uf8DisplayStrip[];
 };
 
@@ -45,7 +46,6 @@ const RETRY_DELAY_MS = 2_000;
 const MOTOR_MOVE_MS = 650;
 const BACKGROUND = rgb565(3, 5, 9);
 const WHITE = rgb565(255, 255, 255);
-const MUTED = rgb565(92, 106, 116);
 const DISPLAY_COLOURS = [
   rgb565(255, 48, 88),
   rgb565(255, 126, 46),
@@ -68,6 +68,7 @@ export class Uf8Runtime {
   #stopping = false;
   #disableMotorsAt: number | null = null;
   #lastDisplaySignature = "";
+  #displayView: Uf8DisplayView | null = null;
   #animationFrame = 0;
   #nextAnimationAt = 0;
 
@@ -120,12 +121,10 @@ export class Uf8Runtime {
     for (const frame of createUf8DisplayFrames(view)) {
       session.write(frame);
     }
-    for (const frame of createUf8AnimationResetFrames()) {
-      session.write(frame);
-    }
     this.#lastDisplaySignature = signature;
+    this.#displayView = view;
     this.#animationFrame = 0;
-    this.#nextAnimationAt = performance.now() + UF8_ANIMATION_INTERVAL_MS;
+    this.#nextAnimationAt = performance.now();
   }
 
   async #run(): Promise<void> {
@@ -152,6 +151,7 @@ export class Uf8Runtime {
         session = await Uf8Session.connect(device.serial);
         this.#session = session;
         this.#lastDisplaySignature = "";
+        this.#displayView = null;
         this.#animationFrame = 0;
         this.#nextAnimationAt = 0;
         this.#setState({ kind: "connected", serial: session.serial });
@@ -174,6 +174,7 @@ export class Uf8Runtime {
         }
         session?.close();
         this.#disableMotorsAt = null;
+        this.#displayView = null;
         this.#nextAnimationAt = 0;
       }
     }
@@ -201,11 +202,17 @@ export class Uf8Runtime {
     }
 
     const now = performance.now();
+    const view = this.#displayView;
     if (
-      this.#lastDisplaySignature !== "" &&
+      view !== null &&
       now >= this.#nextAnimationAt
     ) {
-      for (const frame of createUf8AnimationFrames(this.#animationFrame)) {
+      for (const frame of createUf8AnimationFrames(
+        view.scene,
+        view.strips,
+        this.#animationFrame,
+        Date.now(),
+      )) {
         session.write(frame);
       }
       this.#animationFrame += 1;
@@ -259,6 +266,21 @@ export function createUf8DisplayFrames(
     throw new Error("UF8 display view must contain exactly eight strips");
   }
   const frames: Uint8Array[] = [];
+  if (view.scene.kind !== "mission") {
+    for (let index = 0; index < UF8_DISPLAY_COUNT; index += 1) {
+      frames.push(
+        drawUf8DisplayBox(
+          index,
+          0,
+          0,
+          UF8_DISPLAY_WIDTH,
+          UF8_DISPLAY_HEIGHT,
+          BACKGROUND,
+        ),
+      );
+    }
+    return frames;
+  }
   for (let index = 0; index < UF8_DISPLAY_COUNT; index += 1) {
     const strip = view.strips[index];
     const accent = DISPLAY_COLOURS[index];
@@ -283,45 +305,6 @@ export function createUf8DisplayFrames(
         strip.label,
         "dejavu-sans-bold-14",
       ),
-    );
-    if (strip.cue === null) {
-      frames.push(
-        setUf8DisplayColour(index, MUTED),
-        drawUf8DisplayText(
-          index,
-          35,
-          76,
-          "SYSTEM",
-          "dejavu-sans-bold-10",
-        ),
-        drawUf8DisplayText(
-          index,
-          36,
-          99,
-          "READY",
-          "dejavu-sans-bold-14",
-        ),
-      );
-      continue;
-    }
-    frames.push(
-      setUf8DisplayColour(index, accent),
-      drawUf8DisplayText(
-        index,
-        38,
-        62,
-        strip.cue.heading,
-        "dejavu-sans-bold-10",
-      ),
-      setUf8DisplayColour(index, WHITE),
-      drawUf8DisplayText(
-        index,
-        Math.max(4, 64 - strip.cue.value.length * 4),
-        91,
-        strip.cue.value,
-        "dejavu-sans-bold-16",
-      ),
-      drawUf8DisplayBox(index, 12, 116, 104, 10, accent),
     );
   }
   return frames;

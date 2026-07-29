@@ -66,12 +66,18 @@ to use independent colour coding. The discovered bitmap path means arbitrary
 art should also be possible, but its block transfer is deliberately left for a
 separate, evidence-backed slice.
 
-The direct runtime adds a lightweight panoramic reactor-comet animation beneath
-the static control content. A single coloured segment advances across four
-positions on each display at 8 Hz. Each step clears the previous segment and
-draws the next: 16 compact rectangle commands per second, with no full-screen
-redraws. Static labels and contextual mission cues remain readable while the
-animation continues.
+The direct runtime treats all eight panels as a game display wall, with
+interruptible scenes driven by authoritative mission state:
+
+- a full-screen hyperspace attract loop in the lobby;
+- giant flashing seven-segment digits during the `3–2–1` countdown;
+- animated reactor columns and scan lines beneath live control labels;
+- a red alert takeover for local overrides;
+- distinct survived and hull-lost game-over animations.
+
+Each scene is procedural RGB565 geometry built from the recovered filled-box and
+built-in text commands. Scene transitions redraw immediately, while the active
+scene advances at 6.25 frames per second.
 
 ## Motor faders
 

@@ -476,6 +476,7 @@ function snapshotFor(
 
 function syncUf8Display(): void {
   const view: Uf8DisplayView = {
+    scene: uf8DisplayScene(),
     strips: UF8_CONTROL_LABELS.map((label) => ({
       label,
       cue: null,
@@ -510,6 +511,22 @@ function syncUf8Display(): void {
     }
   }
   uf8.render(view);
+}
+
+function uf8DisplayScene(): Uf8DisplayView["scene"] {
+  switch (game.kind) {
+    case "lobby":
+      return { kind: "attract" };
+    case "countdown":
+      return { kind: "countdown", endsAt: game.endsAt };
+    case "playing":
+      return {
+        kind: "mission",
+        activity: game.mission.activity.kind,
+      };
+    case "game-over":
+      return { kind: "game-over", result: game.reason };
+  }
 }
 
 function streamDeckState() {

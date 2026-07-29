@@ -48,8 +48,9 @@ describe("UF8 direct runtime boundary", () => {
     ).toBeNull();
   });
 
-  test("renders all control names and a contextual hardware cue", () => {
+  test("renders the static mission labels above the animated scene", () => {
     const frames = createUf8DisplayFrames({
+      scene: { kind: "mission", activity: "reactor-procedure" },
       strips: UF8_CONTROL_LABELS.map((label, index) => ({
         label,
         cue:
@@ -69,9 +70,18 @@ describe("UF8 direct runtime boundary", () => {
       )
       .map((message) => new TextDecoder().decode(message.payload.slice(6)));
 
-    expect(frames).toHaveLength(58);
+    expect(frames).toHaveLength(32);
     expect(text).toContain("CORE PRESSURE");
-    expect(text).toContain("REPORT CODE");
-    expect(text).toContain("BETA");
+    expect(text).not.toContain("REPORT CODE");
+    expect(text).not.toContain("BETA");
+  });
+
+  test("gives full-screen scenes a clean display takeover", () => {
+    const frames = createUf8DisplayFrames({
+      scene: { kind: "attract" },
+      strips: UF8_CONTROL_LABELS.map((label) => ({ label, cue: null })),
+    });
+
+    expect(frames).toHaveLength(8);
   });
 });
