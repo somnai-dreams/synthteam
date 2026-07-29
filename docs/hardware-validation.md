@@ -57,8 +57,9 @@ colour-coded label test, and move all faders to the raw-zero (`-INF`) endpoint.
 Direct hardware execution requires pausing SSL 360 because its core owns the
 same USB interface exclusively.
 
-See [`uf8-reverse-engineering.md`](./uf8-reverse-engineering.md) for the exact
-evidence boundary and reproduction commands.
+See
+[`packages/ssl-uf8/PROTOCOL.md`](../packages/ssl-uf8/PROTOCOL.md)
+for the exact evidence boundary.
 
 ## 2026-07-28 · server-owned UF8 mission pass
 

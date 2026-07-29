@@ -4,8 +4,12 @@ const SSL_VENDOR_ID = 0x31e9;
 const UF8_PRODUCT_ID = 0x0021;
 const OPEN_BY_SERIAL_NUMBER = 1;
 
-const D2XX_LIBRARY_PATH =
+export const DEFAULT_D2XX_LIBRARY_PATH =
   "/Applications/SSL 360.app/Contents/Resources/ssld2xx.dylib";
+
+export type Uf8TransportOptions = {
+  d2xxLibraryPath?: string;
+};
 
 const d2xxSymbols = {
   FT_SetVIDPID: {
@@ -75,11 +79,16 @@ const d2xxSymbols = {
   },
 } as const;
 
-function loadD2xxLibrary() {
-  return dlopen(D2XX_LIBRARY_PATH, d2xxSymbols);
+function loadD2xxLibrary(options: Uf8TransportOptions) {
+  return dlopen(
+    options.d2xxLibraryPath ?? DEFAULT_D2XX_LIBRARY_PATH,
+    d2xxSymbols,
+  );
 }
 
-type D2xxLibrary = ReturnType<typeof loadD2xxLibrary>;
+type D2xxLibrary = ReturnType<
+  typeof loadD2xxLibrary
+>;
 
 export type Uf8DeviceInfo = {
   serial: string;
@@ -90,8 +99,10 @@ export type Uf8DeviceInfo = {
   locationId: number;
 };
 
-export function listUf8Devices(): readonly Uf8DeviceInfo[] {
-  const library = loadD2xxLibrary();
+export function listUf8Devices(
+  options: Uf8TransportOptions = {},
+): readonly Uf8DeviceInfo[] {
+  const library = loadD2xxLibrary(options);
   try {
     selectUf8UsbIdentity(library);
     const countOutput = new Uint32Array(1);
@@ -127,8 +138,11 @@ export class Uf8D2xxDevice {
     this.#handle = handle;
   }
 
-  static open(serial: string): Uf8D2xxDevice {
-    const library = loadD2xxLibrary();
+  static open(
+    serial: string,
+    options: Uf8TransportOptions = {},
+  ): Uf8D2xxDevice {
+    const library = loadD2xxLibrary(options);
     const handleOutput = new BigUint64Array(1);
     try {
       selectUf8UsbIdentity(library);

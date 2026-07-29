@@ -116,8 +116,10 @@ bun run probe:uf8 display-test
 bun run probe:uf8 zero-faders
 ```
 
-See [`docs/uf8-reverse-engineering.md`](docs/uf8-reverse-engineering.md) for the
-confirmed packet format and safety boundary.
+See
+[`packages/ssl-uf8/PROTOCOL.md`](packages/ssl-uf8/PROTOCOL.md)
+for the confirmed packet format and safety boundary. Synthteam consumes the
+publishable `@synthteam/ssl-uf8` workspace package for direct hardware access.
 
 ### Ableton Push
 

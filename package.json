@@ -2,16 +2,23 @@
   "name": "synthteam",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*",
+    "hardware/push"
+  ],
   "scripts": {
     "build": "bun run build:app && bun run build:streamdeck",
     "build:app": "bun build --target=bun --outdir=dist src/server/index.ts",
     "build:streamdeck": "bun build --target=node --outdir=dist/streamdeck hardware/streamdeck/com.synthteam.deck.sdPlugin/plugin.mjs",
-    "check": "tsc && oxlint --type-aware --deny-warnings src scripts/probe-uf8.ts",
+    "check": "bun tsc && bun oxlint --type-aware --deny-warnings src scripts packages",
     "dev": "bun --hot src/server/index.ts",
     "probe:midi": "xcrun swift -module-cache-path /tmp/synthteam-swift-module-cache scripts/probe-midi.swift",
     "probe:uf8": "bun scripts/probe-uf8.ts",
     "start": "bun src/server/index.ts",
     "test": "bun test"
+  },
+  "dependencies": {
+    "@synthteam/ssl-uf8": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

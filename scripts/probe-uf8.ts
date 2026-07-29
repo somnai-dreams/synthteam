@@ -1,18 +1,18 @@
-import { listUf8Devices } from "../src/hardware/uf8/d2xx.ts";
 import {
   drawUf8DisplayBox,
   drawUf8DisplayText,
+  listUf8Devices,
   rgb565,
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
   setUf8FaderPosition,
+  Uf8Session,
   uf8FaderPositionFromPercent,
   UF8_DISPLAY_COUNT,
   UF8_DISPLAY_HEIGHT,
   UF8_DISPLAY_WIDTH,
   UF8_FADER_COUNT,
-} from "../src/hardware/uf8/protocol.ts";
-import { Uf8Session } from "../src/hardware/uf8/session.ts";
+} from "@synthteam/ssl-uf8";
 import { UF8_ZERO_FADER_STOP } from "../src/shared/domain.ts";
 
 type Command = "list" | "preview" | "display-test" | "zero-faders";

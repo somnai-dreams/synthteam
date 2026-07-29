@@ -9,7 +9,7 @@ import {
   setUf8FaderPosition,
   uf8FaderPositionFromPercent,
   Uf8FrameDecoder,
-} from "./protocol.ts";
+} from "../src/protocol.ts";
 
 describe("UF8 serial protocol", () => {
   test("frames a payload with the vendor additive checksum", () => {

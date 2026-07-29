@@ -6,7 +6,7 @@ import {
   UF8_DISPLAY_COUNT,
   UF8_DISPLAY_HEIGHT,
   UF8_DISPLAY_WIDTH,
-} from "./protocol.ts";
+} from "@synthteam/ssl-uf8";
 
 export const UF8_ANIMATION_INTERVAL_MS = 160;
 

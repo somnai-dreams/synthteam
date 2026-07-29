@@ -2,27 +2,28 @@ import type {
   Uf8ConnectionState,
   Uf8HardwareEvent,
 } from "../../shared/domain.ts";
-import { listUf8Devices } from "./d2xx.ts";
 import {
+  decodeUf8InputEvent,
   drawUf8DisplayBox,
   drawUf8DisplayText,
+  listUf8Devices,
   rgb565,
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
   setUf8FaderPosition,
   uf8FaderPositionFromPercent,
   type Uf8Message,
+  Uf8Session,
   UF8_DISPLAY_COUNT,
   UF8_DISPLAY_HEIGHT,
   UF8_DISPLAY_WIDTH,
   UF8_FADER_COUNT,
-} from "./protocol.ts";
+} from "@synthteam/ssl-uf8";
 import {
   createUf8AnimationFrames,
   UF8_ANIMATION_INTERVAL_MS,
   type Uf8AnimationScene,
 } from "./animation.ts";
-import { Uf8Session } from "./session.ts";
 
 export type Uf8DisplayStrip = {
   label: string;
@@ -234,30 +235,14 @@ export class Uf8Runtime {
 export function decodeUf8FaderEvent(
   message: Uf8Message,
 ): Uf8HardwareEvent | null {
-  if (message.code !== 33 || (message.payload.length !== 3 && message.payload.length !== 4)) {
-    return null;
-  }
-  const channel = message.payload[0];
-  const low = message.payload[1];
-  const high = message.payload[2];
-  const controlType = message.payload[3] ?? 0;
-  if (
-    channel === undefined ||
-    low === undefined ||
-    high === undefined ||
-    channel >= UF8_FADER_COUNT ||
-    controlType !== 0
-  ) {
-    return null;
-  }
-  const position = low | (high << 8);
-  if (position > 32_767) {
+  const event = decodeUf8InputEvent(message);
+  if (event === null || event.kind !== "fader") {
     return null;
   }
   return {
     kind: "uf8-fader",
-    channel,
-    value: (position / 32_767) * 100,
+    channel: event.index,
+    value: event.normalized * 100,
   };
 }
 

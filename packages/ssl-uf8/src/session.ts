@@ -1,4 +1,7 @@
-import { Uf8D2xxDevice } from "./d2xx.ts";
+import {
+  Uf8D2xxDevice,
+  type Uf8TransportOptions,
+} from "./d2xx.ts";
 import {
   frameUf8Message,
   Uf8FrameDecoder,
@@ -23,8 +26,11 @@ export class Uf8Session {
     this.#decoder = decoder;
   }
 
-  static async connect(serial: string): Promise<Uf8Session> {
-    const device = Uf8D2xxDevice.open(serial);
+  static async connect(
+    serial: string,
+    options: Uf8TransportOptions = {},
+  ): Promise<Uf8Session> {
+    const device = Uf8D2xxDevice.open(serial, options);
     const decoder = new Uf8FrameDecoder();
     try {
       device.write(new Uint8Array(256));
