@@ -469,7 +469,7 @@ function stationName(station: Station): string {
 
 function parsePort(value: string | undefined): number {
   if (value === undefined) {
-    return 3000;
+    return 4179;
   }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65_535) {

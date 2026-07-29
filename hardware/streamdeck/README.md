@@ -1,7 +1,7 @@
 # Stream Deck XL bridge
 
 This plugin uses the Stream Deck application's native plugin WebSocket and
-connects it to the Synthteam server at `ws://127.0.0.1:3000/ws`.
+connects it to the Synthteam server at `ws://127.0.0.1:4179/ws`.
 
 ## Development install
 

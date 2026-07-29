@@ -8,7 +8,7 @@ if (sdkPort === undefined || pluginUUID === undefined || registerEvent === undef
 }
 
 const gameUrl =
-  process.env.SYNTHTEAM_SERVER_URL ?? "ws://127.0.0.1:3000/ws";
+  process.env.SYNTHTEAM_SERVER_URL ?? "ws://127.0.0.1:4179/ws";
 const contexts = new Map();
 let sdkSocket = null;
 let gameSocket = null;

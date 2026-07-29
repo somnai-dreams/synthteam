@@ -25,7 +25,7 @@ bun install
 bun start
 ```
 
-Open `http://localhost:3000/console` in Chrome on the central laptop. The
+Open `http://localhost:4179/console` in Chrome on the central laptop. The
 console prints and displays its available LAN addresses. Open one of those
 addresses on each phone, then claim the Deck, UF8, and Push crew slots.
 
@@ -68,7 +68,7 @@ The dependency-free plugin source is under
 3. Create an XL profile and place **Synthteam Switchboard** on all 32 keys.
 
 The plugin renders the server-owned key names directly onto the LCD keys and
-forwards key-down/key-up events. It expects Synthteam on the default port 3000.
+forwards key-down/key-up events. It expects Synthteam on the default port 4179.
 See `hardware/streamdeck/README.md` for the current profile limitation.
 
 ## Development simulator
