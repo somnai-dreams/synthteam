@@ -177,6 +177,16 @@ export class Push3 extends EventEmitter {
     this.#output.sendMessage([0x90, PAD_LOW + y * 8 + x, color]);
   }
 
+  /**
+   * Light a backlit button by its CC number with a palette index.
+   * The row directly above the pads is CC 102-109 and the row under
+   * the display is CC 20-27 (both RGB); most other buttons are
+   * white-only and treat the value as brightness.
+   */
+  setButton(cc, color) {
+    this.#output.sendMessage([0xb0, cc, color]);
+  }
+
   clearPads() {
     for (let note = PAD_LOW; note <= PAD_HIGH; note++) {
       this.#output.sendMessage([0x90, note, 0]);

@@ -1,9 +1,9 @@
 import type {
+  ActivePushTask,
   ActiveTask,
   CrewSlots,
   HardwareEvent,
   MissionState,
-  PushPathTask,
   Station,
   StreamDeckKey,
   StreamDeckRouteTask,
@@ -112,7 +112,7 @@ export type StreamDeckStateView = {
 
 export type PushStateView = {
   phase: MissionPhaseView;
-  task: PushPathTask | null;
+  task: ActivePushTask | null;
 };
 
 export function publicOrderForReader(
@@ -228,6 +228,8 @@ function parseHardwareEvent(value: unknown): HardwareEvent | null {
         velocity: value.velocity,
       };
     }
+    case "push-defend-failed":
+      return { kind: "push-defend-failed" };
     default:
       return null;
   }

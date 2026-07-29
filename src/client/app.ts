@@ -759,6 +759,8 @@ function taskDescription(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): st
       return `SET ${escapeHtml(task.label)} TO ${task.target}`;
     case "push-path":
       return `TRACE THE ${task.color.toUpperCase()} VECTOR`;
+    case "push-defend":
+      return "DEFEND THE MOTHERSHIP";
   }
 }
 
@@ -770,6 +772,8 @@ function taskProgress(task: ActiveTask): string {
       return task.withinSince === null ? "OUTSIDE TARGET BAND" : "HOLDING";
     case "push-path":
       return `${task.progress}/${task.path.length} PADS`;
+    case "push-defend":
+      return `SPEED ${task.missileSpeed} - SURVIVE TO DEADLINE`;
   }
 }
 
