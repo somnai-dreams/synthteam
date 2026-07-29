@@ -9,6 +9,11 @@ export type Uf8Font =
   | "dejavu-sans-bold-14"
   | "dejavu-sans-bold-10";
 
+export type Uf8Message = {
+  code: number;
+  payload: Uint8Array;
+};
+
 const USB_SET_FADER_MOTOR_ENABLE = 29;
 const USB_SET_FADER_POSITION = 30;
 const USB_RGB_DISPLAY_GRAPHICS = 100;
@@ -56,6 +61,60 @@ export function frameUf8Message(
   }
   frame[frame.length - 1] = checksum;
   return frame;
+}
+
+export class Uf8FrameDecoder {
+  readonly #buffer: number[] = [];
+
+  push(bytes: Uint8Array): readonly Uf8Message[] {
+    for (const byte of bytes) {
+      this.#buffer.push(byte);
+    }
+
+    const messages: Uf8Message[] = [];
+    while (this.#buffer.length > 0) {
+      const startIndex = this.#buffer.indexOf(0xff);
+      if (startIndex === -1) {
+        this.#buffer.length = 0;
+        break;
+      }
+      if (startIndex > 0) {
+        this.#buffer.splice(0, startIndex);
+      }
+      if (this.#buffer.length < 4) {
+        break;
+      }
+
+      const payloadLength = requiredFrameByte(this.#buffer, 2);
+      const frameLength = payloadLength + 4;
+      if (this.#buffer.length < frameLength) {
+        break;
+      }
+
+      let checksum = 0;
+      for (let index = 1; index < frameLength - 1; index += 1) {
+        checksum =
+          (checksum + requiredFrameByte(this.#buffer, index)) & 0xff;
+      }
+      const receivedChecksum = requiredFrameByte(
+        this.#buffer,
+        frameLength - 1,
+      );
+      if (checksum !== receivedChecksum) {
+        this.#buffer.splice(0, 1);
+        continue;
+      }
+
+      messages.push({
+        code: requiredFrameByte(this.#buffer, 1),
+        payload: Uint8Array.from(
+          this.#buffer.slice(3, 3 + payloadLength),
+        ),
+      });
+      this.#buffer.splice(0, frameLength);
+    }
+    return messages;
+  }
 }
 
 export function rgb565(red: number, green: number, blue: number): number {
@@ -211,4 +270,12 @@ function assertUShort(label: string, value: number): void {
 
 function littleEndianUShort(value: number): readonly [number, number] {
   return [value & 0xff, value >> 8];
+}
+
+function requiredFrameByte(buffer: readonly number[], index: number): number {
+  const value = buffer[index];
+  if (value === undefined) {
+    throw new Error(`UF8 frame is missing byte ${index}`);
+  }
+  return value;
 }

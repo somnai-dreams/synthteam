@@ -10,6 +10,8 @@ import {
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
   setUf8FaderPosition,
+  Uf8FrameDecoder,
+  type Uf8Message,
   UF8_DISPLAY_COUNT,
   UF8_DISPLAY_HEIGHT,
   UF8_DISPLAY_WIDTH,
@@ -136,18 +138,29 @@ function drawDisplayTest(device: Uf8D2xxDevice): void {
 }
 
 async function beginHostSession(device: Uf8D2xxDevice): Promise<void> {
-  const startupFrames = [
-    frameUf8Message(1, []),
-    frameUf8Message(2, []),
-    frameUf8Message(5, []),
-    frameUf8Message(100, [0]),
-  ];
-  for (const frame of startupFrames) {
-    device.write(frame);
-    await Bun.sleep(50);
-    device.readAvailable();
+  const decoder = new Uf8FrameDecoder();
+  device.write(new Uint8Array(256));
+
+  const identity = await queryUf8(device, decoder, 1);
+  if (readUShort(identity.payload) !== 0x1234) {
+    throw new Error(`UF8 returned an invalid identity: ${toHex(identity.payload)}`);
   }
-  console.log("Sent UF8 identity, tile-init, and display-init sequence");
+  const tileId = readUShort((await queryUf8(device, decoder, 2)).payload);
+  await queryUf8(device, decoder, 5);
+  await queryUf8(device, decoder, 75);
+  await queryUf8(device, decoder, 78);
+
+  device.write(frameUf8Message(43, [1, 0]));
+  device.write(frameUf8Message(99, [43, 0]));
+  const switchMessages = await waitForUf8Message(
+    device,
+    decoder,
+    (message) => message.code === 99 && message.payload[0] === 43,
+  );
+  device.write(frameUf8Message(100, [0]));
+  console.log(
+    `Completed UF8 0x${tileId.toString(16)} identity, firmware, switch-chain, and display handshake after ${switchMessages} messages`,
+  );
 }
 
 async function pumpHostSession(
@@ -155,18 +168,79 @@ async function pumpHostSession(
   holdSeconds: number,
 ): Promise<void> {
   console.log(
-    `Holding the direct UF8 session for ${holdSeconds} seconds with a 1 Hz identity poll`,
+    `Holding the direct UF8 session for ${holdSeconds} seconds with the 150 ms runtime tick`,
   );
+  const decoder = new Uf8FrameDecoder();
   const deadline = performance.now() + holdSeconds * 1000;
+  let nextRuntimeTick = performance.now();
   while (performance.now() < deadline) {
-    device.write(frameUf8Message(1, []));
-    await Bun.sleep(100);
-    device.readAvailable();
-    const remainingMilliseconds = deadline - performance.now();
-    if (remainingMilliseconds > 0) {
-      await Bun.sleep(Math.min(900, remainingMilliseconds));
+    const now = performance.now();
+    if (now >= nextRuntimeTick) {
+      device.write(frameUf8Message(27, [currentFlashState()]));
+      nextRuntimeTick = now + 150;
     }
+    const messages = decoder.push(device.readAvailable());
+    for (const message of messages) {
+      switch (message.code) {
+        case 6:
+          throw new Error("UF8 requested a host reconnection");
+        case 9:
+          console.log(`UF8 disconnect state: ${toHex(message.payload)}`);
+          break;
+        default:
+          break;
+      }
+    }
+    await Bun.sleep(10);
   }
+}
+
+function currentFlashState(): number {
+  const phase = Math.floor(Date.now() / 150) % 8;
+  const fastFlash = (phase & 1) === 0 ? 0 : 1;
+  const flash = (phase & 4) === 0 ? 0 : 2;
+  return fastFlash | flash;
+}
+
+async function queryUf8(
+  device: Uf8D2xxDevice,
+  decoder: Uf8FrameDecoder,
+  code: number,
+): Promise<Uf8Message> {
+  device.write(frameUf8Message(code, []));
+  let reply: Uf8Message | null = null;
+  await waitForUf8Message(device, decoder, (message) => {
+    if (message.code === code) {
+      reply = message;
+      return true;
+    }
+    return false;
+  });
+  if (reply === null) {
+    throw new Error(`UF8 query ${code} completed without a reply`);
+  }
+  return reply;
+}
+
+async function waitForUf8Message(
+  device: Uf8D2xxDevice,
+  decoder: Uf8FrameDecoder,
+  matches: (message: Uf8Message) => boolean,
+  timeoutMilliseconds = 10_000,
+): Promise<number> {
+  const deadline = performance.now() + timeoutMilliseconds;
+  let messageCount = 0;
+  while (performance.now() < deadline) {
+    const messages = decoder.push(device.readAvailable());
+    for (const message of messages) {
+      messageCount += 1;
+      if (matches(message)) {
+        return messageCount;
+      }
+    }
+    await Bun.sleep(10);
+  }
+  throw new Error(`Timed out after ${timeoutMilliseconds} ms waiting for UF8`);
 }
 
 function displayTestFrames(displayIndex: number): readonly Uint8Array[] {
@@ -244,6 +318,15 @@ function toHex(frame: Uint8Array): string {
   return [...frame]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join(" ");
+}
+
+function readUShort(bytes: Uint8Array): number {
+  const low = bytes[0];
+  const high = bytes[1];
+  if (low === undefined || high === undefined) {
+    throw new Error(`Expected a UF8 ushort, received ${toHex(bytes)}`);
+  }
+  return low | (high << 8);
 }
 
 await main();

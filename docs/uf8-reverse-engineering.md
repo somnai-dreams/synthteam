@@ -102,11 +102,12 @@ bun run probe:uf8 zero-faders
 If multiple units are present, append `--serial SERIAL`. The probe intentionally
 does not store a device serial in the repository.
 
-The display test performs the recovered identity, tile-init, and display-init
-sequence before drawing, then holds the direct USB session open for 30 seconds.
-Use `--hold-seconds N` to change that inspection window. While held, the probe
-drains controller replies and sends a read-only identity query once per second.
-Closing the session
+The display test performs the recovered identity, tile-init, firmware-version,
+switch-chain acknowledgement, and display-init sequence before drawing, then
+holds the direct USB session open for 30 seconds. Use `--hold-seconds N` to
+change that inspection window. While held, the probe continuously decodes
+controller traffic and reproduces SSL 360's command `27` flash-state tick every
+150 ms. That tick also services the UF8's runtime host watchdog. Closing the session
 returns the UF8 to its host-loss screen until SSL 360 reconnects.
 
 `bun:ffi` is experimental, so this adapter is currently a hardware validation

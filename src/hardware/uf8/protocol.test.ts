@@ -7,6 +7,7 @@ import {
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
   setUf8FaderPosition,
+  Uf8FrameDecoder,
 } from "./protocol.ts";
 
 describe("UF8 serial protocol", () => {
@@ -29,6 +30,34 @@ describe("UF8 serial protocol", () => {
     expect(frameUf8Message(100, [0])).toEqual(
       new Uint8Array([0xff, 100, 1, 0, 101]),
     );
+  });
+
+  test("decodes fragmented frames and skips noise", () => {
+    const decoder = new Uf8FrameDecoder();
+    expect(decoder.push(new Uint8Array([0, 7, 0xff, 1]))).toEqual([]);
+    expect(decoder.push(new Uint8Array([2, 0x34, 0x12, 0x49]))).toEqual([
+      {
+        code: 1,
+        payload: new Uint8Array([0x34, 0x12]),
+      },
+    ]);
+  });
+
+  test("resynchronizes after an invalid checksum", () => {
+    const decoder = new Uf8FrameDecoder();
+    expect(
+      decoder.push(
+        new Uint8Array([
+          0xff, 1, 0, 9,
+          ...frameUf8Message(2, [0x1f, 0xfc]),
+        ]),
+      ),
+    ).toEqual([
+      {
+        code: 2,
+        payload: new Uint8Array([0x1f, 0xfc]),
+      },
+    ]);
   });
 
   test("encodes RGB565 display colours in little-endian order", () => {
