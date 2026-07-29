@@ -56,6 +56,18 @@ export const PAD_COLORS = {
   violet: 79,
 };
 
+
+// Buttons with full RGB LEDs, from Ableton's official Push2-map.json
+// (all other buttons are white-only: the value maps to brightness
+// through a separate white palette). Push 3 additions like Save/Lock
+// are white-only too.
+export const RGB_BUTTON_CCS = new Set([
+  20, 21, 22, 23, 24, 25, 26, 27,       // lower row (below display)
+  102, 103, 104, 105, 106, 107, 108, 109, // upper row (above display)
+  36, 37, 38, 39, 40, 41, 42, 43,       // scene column
+  29, 60, 61, 85, 86, 89,               // stop, mute, solo, play, rec, automate
+]);
+
 export class Push3Display {
   #device = null;
   #frame = Buffer.alloc(FRAME_BYTES);
@@ -149,6 +161,15 @@ export class Push3 extends EventEmitter {
 
   #onMidi([status, data1, data2]) {
     const kind = status & 0xf0;
+    if (kind === 0xe0) {
+      // Touch strip: 14-bit pitch bend, springs back to center (8192)
+      this.emit("strip", { value: (data2 << 7) | data1 });
+      return;
+    }
+    if ((kind === 0x90 || kind === 0x80) && data1 === 12) {
+      this.emit("striptouch", { down: kind === 0x90 && data2 > 0 });
+      return;
+    }
     if ((kind === 0x90 || kind === 0x80) && data1 >= PAD_LOW && data1 <= PAD_HIGH) {
       this.emit("pad", {
         x: (data1 - PAD_LOW) % 8,
@@ -157,9 +178,18 @@ export class Push3 extends EventEmitter {
         velocity: data2,
       });
     } else if (kind === 0xb0) {
-      if (data1 >= 71 && data1 <= 78) {
+      if ((data1 >= 71 && data1 <= 79) || data1 === 14 || data1 === 15) {
+        // Relative encoders: the 8 above the display (71-78), the big
+        // master knob (79) and the small knob (14/15) — on Push 3 the
+        // latter two sit top-left.
         this.emit("encoder", {
-          index: data1 - 70,
+          index: data1 >= 71 && data1 <= 78 ? data1 - 70 : null,
+          cc: data1,
+          name:
+            data1 === 79 ? "master"
+            : data1 === 14 ? "small-1"
+            : data1 === 15 ? "small-2"
+            : `encoder-${data1 - 70}`,
           step: data2 < 64 ? data2 : data2 - 128,
         });
       } else if (data1 === 70 || data1 === 93 || data1 === 94 || data1 === 95) {
@@ -168,23 +198,35 @@ export class Push3 extends EventEmitter {
           gesture,
           value: data1 === 70 && data2 >= 64 ? data2 - 128 : data2,
         });
+      } else {
+        // Everything else on the surface is a backlit button sending
+        // 127 on press, 0 on release.
+        this.emit("button", { cc: data1, down: data2 > 0 });
       }
     }
   }
 
-  /** Light pad (x, y) with a palette index — see PAD_COLORS. */
-  setPad(x, y, color) {
-    this.#output.sendMessage([0x90, PAD_LOW + y * 8 + x, color]);
+  /**
+   * Light pad (x, y) with a palette index — see PAD_COLORS.
+   * `channel` selects the LED animation: 0 static, 1-5 one-shot fade,
+   * 6-10 pulse, 11-15 blink (each group ordered 24th, 16th, 8th,
+   * quarter, half note; synced to MIDI clock, 120 bpm by default).
+   * Animations run from the last channel-0 color to this color.
+   */
+  setPad(x, y, color, channel = 0) {
+    this.#output.sendMessage([0x90 | channel, PAD_LOW + y * 8 + x, color]);
   }
 
   /**
    * Light a backlit button by its CC number with a palette index.
    * The row directly above the pads is CC 102-109 and the row under
-   * the display is CC 20-27 (both RGB); most other buttons are
-   * white-only and treat the value as brightness.
+   * the display is CC 20-27 (both RGB, plus the scene column 36-43
+   * and a few transport buttons); most other buttons are white-only
+   * and map the palette index to brightness. `channel` animates as
+   * in setPad.
    */
-  setButton(cc, color) {
-    this.#output.sendMessage([0xb0, cc, color]);
+  setButton(cc, color, channel = 0) {
+    this.#output.sendMessage([0xb0 | channel, cc, color]);
   }
 
   clearPads() {

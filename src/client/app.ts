@@ -1196,6 +1196,16 @@ function taskDescription(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): st
       return `TRACE THE ${task.color.toUpperCase()} VECTOR`;
     case "push-defend":
       return "DEFEND THE MOTHERSHIP";
+    case "push-console": {
+      const label = task.labels[task.targetIndex] ?? "?";
+      return task.action.kind === "scale"
+        ? `SCALE ${escapeHtml(label)} TO ${task.action.value}`
+        : `${escapeHtml(task.action.verb)} ${escapeHtml(label)}`;
+    }
+    case "push-review":
+      return `${task.decision.toUpperCase()} "${escapeHtml(task.subject)} ${escapeHtml(task.verb)}"`;
+    case "push-cow":
+      return task.action === "abduct" ? "ABDUCT THE COW" : "RELEASE THE COW";
   }
 }
 
@@ -1218,6 +1228,17 @@ function taskProgress(task: ActiveTask): string {
       return `${task.progress}/${task.path.length} PADS`;
     case "push-defend":
       return `SPEED ${task.missileSpeed} - SURVIVE TO DEADLINE`;
+    case "push-console":
+      if (task.action.kind === "scale" && task.verbDone && task.labelDone) {
+        return `DIALING ${task.value}/${task.action.value}`;
+      }
+      return task.verbDone || task.labelDone
+        ? "PARTIALLY ENTERED"
+        : "WAITING FOR CONSOLE";
+    case "push-review":
+      return "AWAITING JUDGEMENT";
+    case "push-cow":
+      return "TRACTOR BEAM ENGAGED";
   }
 }
 

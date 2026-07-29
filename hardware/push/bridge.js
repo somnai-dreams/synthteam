@@ -23,7 +23,7 @@
 // Run:  bun bridge.js  [--server ws://127.0.0.1:4179/ws]
 
 import { drawText, fillRect, textWidth } from "./font.js";
-import { HEIGHT, PAD_COLORS, Push3, WIDTH } from "./push3.js";
+import { HEIGHT, PAD_COLORS, Push3, RGB_BUTTON_CCS, WIDTH } from "./push3.js";
 
 // Push palette index + screen RGB for each PushPathColor the game uses.
 const PATH_COLORS = {
@@ -36,6 +36,36 @@ const PATH_COLORS = {
 const HULL_FLASH_MS = 1500;
 const EXPLOSION_MS = 220;
 const IMPACT_FLASH_MS = 700;
+
+// Console orders: labels map to the RGB button rows around the display
+// (0-7 above it on CC 102-109, 8-15 below it on CC 20-27); the verb is
+// a real labelled Push button, with SCALES driving dial orders.
+const CONSOLE_TOP_ROW = [102, 103, 104, 105, 106, 107, 108, 109];
+const CONSOLE_BOTTOM_ROW = [20, 21, 22, 23, 24, 25, 26, 27];
+const SCALES_CC = 58;
+const VERB_CCS = {
+  116: "QUANTIZE", 60: "MUTE", 61: "SOLO", 88: "DUPLICATE", 118: "DELETE",
+  56: "REPEAT", 57: "ACCENT", 35: "CONVERT", 89: "AUTOMATE", 83: "LOCK",
+  [SCALES_CC]: "SCALE",
+};
+// Buttons with RGB LEDs use the color palette; the rest are white-only
+// and read the value through the white palette (most of which is a
+// barely-visible gray), so they need explicit near-max values.
+const WHITE_FULL = 127;
+// Review activity: judge the announcement with the real Undo/Save keys.
+const UNDO_CC = 119;
+const SAVE_CC = 82;
+
+const CONSOLE_COLUMN_COLORS = [
+  [PAD_COLORS.red, [255, 90, 90]],
+  [PAD_COLORS.orange, [255, 150, 60]],
+  [PAD_COLORS.yellow, [255, 230, 80]],
+  [PAD_COLORS.lime, [170, 255, 80]],
+  [PAD_COLORS.green, [60, 220, 120]],
+  [PAD_COLORS.cyan, [60, 220, 220]],
+  [PAD_COLORS.blue, [100, 140, 255]],
+  [PAD_COLORS.magenta, [255, 100, 220]],
+];
 
 // Our saucer, filling the full width of the screen: gray upper dome
 // (cropped by the top edge), a rim of glowing windows, and a yellow
@@ -67,6 +97,17 @@ const serverUrl =
   serverArg >= 0 ? process.argv[serverArg + 1] : "ws://127.0.0.1:4179/ws";
 
 const push = await Push3.open();
+// Sweep the whole surface clean: another tool (e.g. the button
+// explorer) may have been killed without its cleanup running, leaving
+// stale LEDs that our scenes would never repaint.
+for (let cc = 0; cc < 120; cc++) {
+  push.setButton(cc, 0);
+}
+for (let x = 0; x < 8; x++) {
+  for (let y = 0; y < 8; y++) {
+    push.setPad(x, y, 0);
+  }
+}
 console.log("push bridge: hardware linked");
 
 let connected = false;
@@ -80,6 +121,42 @@ const litPathPads = new Set();
 
 // Local state for the running push-defend activity, or null.
 let defend = null;
+
+// Local state for the running push-cow (tractor beam) activity.
+// progress runs 0 (on the ground) .. 1 (inside the ship); the cow
+// starts hidden mid-beam and is revealed by the first strip touch.
+let cow = null;
+
+function initCow(cowTask) {
+  lightPath(null);
+  cow = {
+    taskId: cowTask.id,
+    progress: 0.5,
+    velocity: 0,
+    revealed: false,
+    done: null, // "abduct" | "release" once resolved
+    lastTick: performance.now(),
+  };
+}
+
+// A cow, 14x9: 1 white hide, 2 black patches, 3 pink nose/udder.
+const COW_SPRITE = [
+  "01100000000110",
+  "11110111111111",
+  "13110111211110",
+  "11110111112110",
+  "00110111111110",
+  "00011121111100",
+  "00011111311100",
+  "00010010010010",
+  "00010010010010",
+];
+const COW_COLORS = {
+  1: [235, 235, 230],
+  2: [40, 38, 36],
+  3: [235, 150, 160],
+};
+const COW_RATE = 0.45; // full strip deflection: ground<->ship in ~2.2s
 
 function initDefend(defendTask) {
   clearPadGrid();
@@ -180,6 +257,55 @@ push.on("pad", ({ x, y, down, velocity }) => {
   );
 });
 
+function sendEvent(event) {
+  socket.send(JSON.stringify({ type: "hardware-event", event }));
+}
+
+push.on("button", ({ cc, down }) => {
+  if (!connected || !down) {
+    return;
+  }
+  if (task?.kind === "push-console") {
+    if (CONSOLE_TOP_ROW.includes(cc)) {
+      sendEvent({ kind: "push-console-label", index: cc - 102 });
+    } else if (CONSOLE_BOTTOM_ROW.includes(cc)) {
+      sendEvent({ kind: "push-console-label", index: 8 + (cc - 20) });
+    } else if (cc in VERB_CCS) {
+      sendEvent({ kind: "push-console-verb", cc });
+    }
+    return;
+  }
+  if (task?.kind === "push-review") {
+    if (cc === UNDO_CC) {
+      sendEvent({ kind: "push-review-choice", choice: "undo" });
+    } else if (cc === SAVE_CC) {
+      sendEvent({ kind: "push-review-choice", choice: "save" });
+    }
+  }
+});
+
+push.on("strip", ({ value }) => {
+  if (cow !== null && cow.done === null && task?.kind === "push-cow") {
+    cow.velocity = (value - 8192) / 8192; // -1 .. 1, springs back to 0
+    if (Math.abs(cow.velocity) > 0.05) {
+      cow.revealed = true;
+    }
+  }
+});
+
+push.on("dial", ({ gesture, value }) => {
+  if (!connected || task?.kind !== "push-console" || gesture !== "turn") {
+    return;
+  }
+  if (!task.verbDone || !task.labelDone || task.action.kind !== "scale") {
+    return;
+  }
+  const next = Math.max(0, Math.min(8, task.value + Math.sign(value)));
+  if (next !== task.value) {
+    sendEvent({ kind: "push-console-set", value: next });
+  }
+});
+
 function applyState(state) {
   phase = state.phase;
   task = state.task;
@@ -191,6 +317,14 @@ function applyState(state) {
     }
   } else {
     endDefend();
+  }
+
+  if (task?.kind === "push-cow" && phase.kind === "playing") {
+    if (cow === null || cow.taskId !== task.id) {
+      initCow(task);
+    }
+  } else {
+    cow = null;
   }
 
   const integrity = phase.kind === "playing" ? phase.integrity : null;
@@ -344,6 +478,25 @@ function tickDefend() {
   );
 }
 
+function tickCow() {
+  if (cow === null || task?.kind !== "push-cow" || cow.done !== null) {
+    return;
+  }
+  const now = performance.now();
+  const dt = (now - cow.lastTick) / 1000;
+  cow.lastTick = now;
+  cow.progress += cow.velocity * COW_RATE * dt;
+  if (cow.progress >= 1) {
+    cow.progress = 1;
+    cow.done = "abduct";
+    sendEvent({ kind: "push-cow-done", action: "abduct" });
+  } else if (cow.progress <= 0) {
+    cow.progress = 0;
+    cow.done = "release";
+    sendEvent({ kind: "push-cow-done", action: "release" });
+  }
+}
+
 // ---- Pad LEDs for the defend battle ----
 
 const litDefendPads = new Map();
@@ -378,26 +531,184 @@ function renderDefendPads() {
   }
 }
 
-// ---- Button backlights: CC 102-109 is the defend hull bar ----
+// ---- Button backlight scenes ----
+//
+// LED animations run on the hardware (the MIDI channel picks them), so
+// scenes are painted only when their key changes, not every frame.
 
-const BUTTON_ROW = [102, 103, 104, 105, 106, 107, 108, 109];
-const litButtons = new Map();
+const ALL_SCENE_BUTTONS = [
+  ...CONSOLE_TOP_ROW,
+  ...CONSOLE_BOTTOM_ROW,
+  ...Object.keys(VERB_CCS).map(Number),
+];
+let buttonSceneKey = "";
+
+function buttonScene() {
+  const now = performance.now();
+  if (defend !== null) {
+    const impact = defend.failed || now < defend.impactUntil;
+    return {
+      key: `defend:${defend.hull}:${impact}`,
+      paint: () => {
+        for (const [index, cc] of CONSOLE_TOP_ROW.entries()) {
+          push.setButton(
+            cc,
+            impact ? PAD_COLORS.red
+            : index < defend.hull ? PAD_COLORS.yellow : PAD_COLORS.off,
+          );
+        }
+        for (const cc of CONSOLE_BOTTOM_ROW) {
+          push.setButton(cc, impact ? PAD_COLORS.red : 1); // dim grey
+        }
+        for (const cc of Object.keys(VERB_CCS).map(Number)) {
+          push.setButton(cc, PAD_COLORS.off);
+        }
+      },
+    };
+  }
+  if (task?.kind === "push-console" && phase.kind === "playing") {
+    const verbCc = task.action.kind === "scale" ? SCALES_CC : task.action.verbCc;
+    return {
+      key: `console:${task.id}:${task.verbDone}:${task.labelDone}`,
+      animated: true,
+      paint: () => {
+        for (const [index, cc] of CONSOLE_TOP_ROW.entries()) {
+          push.setButton(cc, CONSOLE_COLUMN_COLORS[index][0]);
+        }
+        for (const [index, cc] of CONSOLE_BOTTOM_ROW.entries()) {
+          push.setButton(cc, CONSOLE_COLUMN_COLORS[index][0]);
+        }
+        // Candidate verbs breathe dim<->bright (hardware pulse)
+        for (const cc of Object.keys(VERB_CCS).map(Number)) {
+          if (RGB_BUTTON_CCS.has(cc)) {
+            push.setButton(cc, 1, 0); // dim grey base
+            push.setButton(cc, PAD_COLORS.white, 10);
+          } else {
+            push.setButton(cc, 16, 0); // dim white base
+            push.setButton(cc, WHITE_FULL, 10);
+          }
+        }
+        if (task.verbDone) {
+          // The accepted verb switches to a fast, unmistakable pulse
+          if (RGB_BUTTON_CCS.has(verbCc)) {
+            push.setButton(verbCc, PAD_COLORS.green, 7);
+          } else {
+            push.setButton(verbCc, 40, 0);
+            push.setButton(verbCc, WHITE_FULL, 7);
+          }
+        }
+        if (task.labelDone) {
+          const target = task.targetIndex < 8
+            ? CONSOLE_TOP_ROW[task.targetIndex]
+            : CONSOLE_BOTTOM_ROW[task.targetIndex - 8];
+          push.setButton(target, PAD_COLORS.white, 8);
+        }
+      },
+    };
+  }
+  if (task?.kind === "push-review" && phase.kind === "playing") {
+    return {
+      key: `review:${task.id}`,
+      paint: () => {
+        for (const cc of [...CONSOLE_TOP_ROW, ...CONSOLE_BOTTOM_ROW]) {
+          push.setButton(cc, PAD_COLORS.amber + 1); // dim amber alert
+        }
+        for (const cc of Object.keys(VERB_CCS).map(Number)) {
+          push.setButton(cc, PAD_COLORS.off);
+        }
+        // The two judgement keys blink at quarter-note speed
+        push.setButton(UNDO_CC, 20, 0);
+        push.setButton(UNDO_CC, WHITE_FULL, 14);
+        push.setButton(SAVE_CC, 20, 0);
+        push.setButton(SAVE_CC, WHITE_FULL, 14);
+      },
+    };
+  }
+  if (task?.kind === "push-cow" && phase.kind === "playing") {
+    return {
+      key: `cow:${task.id}`,
+      paint: () => {
+        for (const cc of [...CONSOLE_TOP_ROW, ...CONSOLE_BOTTOM_ROW]) {
+          push.setButton(cc, PAD_COLORS.green + 1); // dim beam green
+        }
+        for (const cc of Object.keys(VERB_CCS).map(Number)) {
+          push.setButton(cc, PAD_COLORS.off);
+        }
+      },
+    };
+  }
+  if (phase.kind === "lobby") {
+    return {
+      key: "lobby",
+      animated: true,
+      paint: () => {
+        // Idle breathing on the display rows: static base = dim shade
+        // (palette index +1), then pulse to the bright shade (-1) —
+        // the hardware fades dim<->bright on its own.
+        for (const cc of CONSOLE_TOP_ROW) {
+          push.setButton(cc, PAD_COLORS.cyan + 1, 0);
+          push.setButton(cc, PAD_COLORS.cyan - 1, 10); // pulse, half note
+        }
+        for (const cc of CONSOLE_BOTTOM_ROW) {
+          push.setButton(cc, PAD_COLORS.blue + 1, 0);
+          push.setButton(cc, PAD_COLORS.blue - 1, 10);
+        }
+        for (const cc of Object.keys(VERB_CCS).map(Number)) {
+          push.setButton(cc, PAD_COLORS.off);
+        }
+      },
+    };
+  }
+  if (phase.kind === "game-over") {
+    const survived = phase.reason === "survived";
+    return {
+      key: `game-over:${phase.reason}`,
+      animated: true,
+      paint: () => {
+        for (const cc of [...CONSOLE_TOP_ROW, ...CONSOLE_BOTTOM_ROW]) {
+          push.setButton(cc, survived ? PAD_COLORS.green + 1 : PAD_COLORS.red + 1, 0);
+          push.setButton(cc, survived ? PAD_COLORS.green - 1 : PAD_COLORS.red - 1, 10);
+        }
+        for (const cc of Object.keys(VERB_CCS).map(Number)) {
+          push.setButton(cc, PAD_COLORS.off);
+        }
+      },
+    };
+  }
+  // Countdown and vector orders: soft grey ambient on the display rows
+  return {
+    key: `ambient:${phase.kind}`,
+    paint: () => {
+      for (const cc of [...CONSOLE_TOP_ROW, ...CONSOLE_BOTTOM_ROW]) {
+        push.setButton(cc, 1); // dim grey glow
+      }
+      for (const cc of Object.keys(VERB_CCS).map(Number)) {
+        push.setButton(cc, PAD_COLORS.off);
+      }
+    },
+  };
+}
+
+let buttonScenePaintedAt = 0;
+const SCENE_REFRESH_MS = 2000;
 
 function renderButtons() {
+  const scene = buttonScene();
   const now = performance.now();
-  for (const [index, cc] of BUTTON_ROW.entries()) {
-    let color = PAD_COLORS.off;
-    if (defend !== null) {
-      if (defend.failed || now < defend.impactUntil) {
-        color = PAD_COLORS.red;
-      } else if (index < defend.hull) {
-        color = PAD_COLORS.yellow;
-      }
+  // Repaint on scene change, and periodically even without one — the
+  // hardware can lose LED state (replug, missed message) and a cached
+  // scene key would otherwise leave it dark until the next transition.
+  // Animated scenes refresh on a slower cycle so their hardware-driven
+  // pulses aren't visibly restarted every couple of seconds.
+  const refreshMs = scene.animated === true ? 10_000 : SCENE_REFRESH_MS;
+  if (scene.key !== buttonSceneKey || now - buttonScenePaintedAt > refreshMs) {
+    if (buttonSceneKey.startsWith("review") && !scene.key.startsWith("review")) {
+      push.setButton(UNDO_CC, PAD_COLORS.off);
+      push.setButton(SAVE_CC, PAD_COLORS.off);
     }
-    if (litButtons.get(cc) !== color) {
-      push.setButton(cc, color);
-      litButtons.set(cc, color);
-    }
+    buttonSceneKey = scene.key;
+    buttonScenePaintedAt = now;
+    scene.paint();
   }
 }
 
@@ -495,6 +806,133 @@ function renderDefendScreen(now) {
   }
 }
 
+function renderConsoleScreen(now) {
+  fillRect(buffer, WIDTH, 0, 0, WIDTH, HEIGHT, 8, 12, 24);
+  const cellWidth = WIDTH / 8;
+  const stripHeight = 36;
+
+  // Label strips aligned with the physical button rows around the
+  // display: indexes 0-7 along the top edge, 8-15 along the bottom.
+  for (let index = 0; index < 16; index++) {
+    const column = index % 8;
+    const top = index < 8;
+    const x = column * cellWidth;
+    const y = top ? 0 : HEIGHT - stripHeight;
+    const [, rgb] = CONSOLE_COLUMN_COLORS[column];
+    const selected = task.labelDone && index === task.targetIndex;
+    if (selected) {
+      fillRect(buffer, WIDTH, x + 2, y + 2, cellWidth - 4, stripHeight - 4,
+        30, 44, 36);
+    }
+    // Color bar on the edge nearest the physical button
+    fillRect(buffer, WIDTH, x + 4, top ? 0 : HEIGHT - 4, cellWidth - 8, 4,
+      ...rgb);
+    const words = String(task.labels[index] ?? "").split(" ");
+    for (const [line, word] of words.entries()) {
+      drawText(buffer, WIDTH, word,
+        x + 6, (top ? 8 : HEIGHT - stripHeight + 4) + line * 16, 2,
+        selected ? [140, 255, 180] : [200, 205, 215]);
+    }
+  }
+
+  const dialing =
+    task.action.kind === "scale" && task.verbDone && task.labelDone;
+  if (dialing) {
+    // Counter next to the big dial (top-left on the Push 3)
+    drawText(buffer, WIDTH, String(task.value), 24, 48, 9, [255, 230, 0]);
+    drawText(buffer, WIDTH, "TURN THE BIG DIAL", 130, 66, 3, [200, 205, 215]);
+  } else {
+    const entered = [
+      task.verbDone
+        ? (task.action.kind === "scale" ? "SCALE" : task.action.verb)
+        : null,
+      task.labelDone ? task.labels[task.targetIndex] : null,
+    ].filter((part) => part !== null);
+    const text = entered.length > 0 ? entered.join(" ") : "AWAITING ORDER";
+    drawText(buffer, WIDTH, text, 24, 60, 4,
+      entered.length > 0 ? [140, 255, 180] : [140, 150, 173]);
+  }
+
+  const orderLeft = Math.max(0, task.deadlineAt / 1000 - Date.now() / 1000);
+  drawText(buffer, WIDTH, `${orderLeft.toFixed(1)}S`,
+    WIDTH - 120, 52, 4,
+    orderLeft < 3 ? [224, 85, 85] : [140, 150, 173]);
+  drawText(buffer, WIDTH, `SCORE ${phase.score}`, WIDTH - 200, 92, 3,
+    [127, 212, 255]);
+}
+
+function renderReviewScreen(now) {
+  // Alarm wash: the announcement demands a judgement
+  const tint = 14 + Math.round(8 * Math.sin(now / 200));
+  fillRect(buffer, WIDTH, 0, 0, WIDTH, HEIGHT, 28 + tint, 10, 12);
+
+  const headline = task.subject;
+  const scale = headline.length > 10 ? 7 : 9;
+  centered(headline, 18, scale, [255, 255, 255]);
+  centered(`${task.verb}!`, 24 + 7 * scale, 5, [255, 160, 60]);
+
+  drawText(buffer, WIDTH, "UNDO OR SAVE - AS ORDERED", 16, HEIGHT - 22, 2,
+    [200, 205, 215]);
+  const orderLeft = Math.max(0, task.deadlineAt / 1000 - Date.now() / 1000);
+  drawText(buffer, WIDTH, `${orderLeft.toFixed(1)}S`,
+    WIDTH - 110, HEIGHT - 26, 3,
+    orderLeft < 3 ? [255, 230, 0] : [200, 205, 215]);
+}
+
+function renderCowScreen(now) {
+  fillRect(buffer, WIDTH, 0, 0, WIDTH, HEIGHT, 8, 12, 24);
+  const shipBottom = drawShip(now);
+  const groundY = HEIGHT - 12;
+  fillRect(buffer, WIDTH, 0, groundY, WIDTH, HEIGHT - groundY, 40, 60, 30);
+
+  // Tractor beam: a widening cone of green light under the belly
+  const beamCenter = WIDTH / 2;
+  const pulse = 0.7 + 0.3 * Math.sin(now / 300);
+  for (let y = Math.round(shipBottom); y < groundY; y++) {
+    const t = (y - shipBottom) / (groundY - shipBottom);
+    const halfWidth = 30 + t * 90;
+    fillRect(buffer, WIDTH, beamCenter - halfWidth, y, halfWidth * 2, 1,
+      Math.round(20 * pulse), Math.round((60 + 40 * (1 - t)) * pulse),
+      Math.round(30 * pulse));
+  }
+
+  if (cow !== null && (cow.revealed || cow.done !== null)) {
+    const scale = 4;
+    const cowWidth = COW_SPRITE[0].length * scale;
+    const cowHeight = COW_SPRITE.length * scale;
+    const topY = shipBottom - 6;
+    const bottomY = groundY - cowHeight;
+    const cowY = bottomY - (bottomY - topY) * cow.progress;
+    const wobble = Math.sin(now / 180) * (cow.done === null ? 4 : 0);
+    for (let row = 0; row < COW_SPRITE.length; row++) {
+      for (let col = 0; col < COW_SPRITE[row].length; col++) {
+        const cell = COW_SPRITE[row][col];
+        if (cell === "0") {
+          continue;
+        }
+        fillRect(buffer, WIDTH,
+          beamCenter - cowWidth / 2 + col * scale + wobble,
+          cowY + row * scale, scale, scale, ...COW_COLORS[cell]);
+      }
+    }
+  } else {
+    centered("SOMETHING IS IN THE BEAM...", 70, 3, [140, 255, 180]);
+  }
+
+  if (cow?.done === "abduct") {
+    centered("SPECIMEN ACQUIRED", 100, 4, [70, 214, 140]);
+  } else if (cow?.done === "release") {
+    centered("SPECIMEN RELEASED", 100, 4, [70, 214, 140]);
+  } else {
+    drawText(buffer, WIDTH, "TOUCH STRIP: UP OR DOWN - AS ORDERED",
+      16, HEIGHT - 34, 2, [200, 205, 215]);
+  }
+  const orderLeft = Math.max(0, task.deadlineAt / 1000 - Date.now() / 1000);
+  drawText(buffer, WIDTH, `${orderLeft.toFixed(1)}S`,
+    WIDTH - 110, HEIGHT - 38, 3,
+    orderLeft < 3 ? [255, 230, 0] : [200, 205, 215]);
+}
+
 function renderPathScreen(now) {
   fillRect(buffer, WIDTH, 0, 0, WIDTH, HEIGHT, 8, 12, 24);
 
@@ -519,7 +957,7 @@ function renderPathScreen(now) {
         gridX + point.x * cell, gridY + (7 - point.y) * cell,
         cell - 3, cell - 3, ...color);
     });
-    drawText(buffer, WIDTH, `${task.color} VECTOR`, 170, 12, 4, rgb);
+    drawText(buffer, WIDTH, `${task.color} VECTOR`, 170, 14, 3, rgb);
     drawText(buffer, WIDTH,
       `${task.progress}/${task.path.length} TRACED`, 170, 52, 3,
       [200, 205, 215]);
@@ -544,7 +982,7 @@ function renderPathScreen(now) {
   } else {
     drawText(buffer, WIDTH, "STANDBY", 170, 26, 6, [140, 150, 173]);
   }
-  drawText(buffer, WIDTH, `SCORE ${phase.score}`, 430, 12, 4, [127, 212, 255]);
+  drawText(buffer, WIDTH, `SCORE ${phase.score}`, 430, 14, 3, [127, 212, 255]);
   if (phase.combo > 1) {
     drawText(buffer, WIDTH, `COMBO X${phase.combo}`, 430, 52, 3, [255, 230, 0]);
   }
@@ -596,6 +1034,12 @@ function renderScreen() {
     case "playing": {
       if (defend !== null && task?.kind === "push-defend") {
         renderDefendScreen(now);
+      } else if (task?.kind === "push-console") {
+        renderConsoleScreen(now);
+      } else if (task?.kind === "push-review") {
+        renderReviewScreen(now);
+      } else if (task?.kind === "push-cow") {
+        renderCowScreen(now);
       } else {
         renderPathScreen(now);
       }
@@ -616,6 +1060,7 @@ function renderScreen() {
 
 const timer = setInterval(() => {
   tickDefend();
+  tickCow();
   renderDefendPads();
   renderButtons();
   renderScreen();
@@ -623,7 +1068,7 @@ const timer = setInterval(() => {
 
 process.on("SIGINT", () => {
   clearInterval(timer);
-  for (const cc of BUTTON_ROW) {
+  for (const cc of [...ALL_SCENE_BUTTONS, UNDO_CC, SAVE_CC]) {
     push.setButton(cc, PAD_COLORS.off);
   }
   void push.close().then(() => process.exit(0));

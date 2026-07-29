@@ -626,7 +626,10 @@ function pushState(): PushStateView {
         game.mission.activity.tasks.find(
           (candidate): candidate is ActivePushTask =>
             candidate.kind === "push-path" ||
-            candidate.kind === "push-defend",
+            candidate.kind === "push-defend" ||
+            candidate.kind === "push-console" ||
+            candidate.kind === "push-review" ||
+            candidate.kind === "push-cow",
         ) ?? null;
       break;
     case "interstitial":
@@ -698,7 +701,8 @@ function canSubmitHardware(
     case "streamdeck":
       return eventKind === "streamdeck-key";
     case "push-bridge":
-      return eventKind === "push-pad" || eventKind === "push-defend-failed";
+      // Pads, defend reports, console verb/label/dial and cow events
+      return eventKind.startsWith("push-");
     case "anonymous":
     case "phone":
       send(socket, {

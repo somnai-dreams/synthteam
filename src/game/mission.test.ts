@@ -366,6 +366,212 @@ describe("cross-routed orders", () => {
   });
 });
 
+// The push-variety activities only roll from level 2 (level 1 is pure
+// vector training), so these tests bump the mission to level 2 and let
+// the initial orders expire; the replacements roll with level-2 bands:
+// console (0.75, 1], cow (0.65, 0.75], review (0.55, 0.65].
+function levelTwoPushTask(roller: number | (() => number)) {
+  let fn: () => number = () => 0.5;
+  let nextId = 0;
+  const dependencies: MissionDependencies = {
+    random: () => fn(),
+    makeId: () => {
+      nextId += 1;
+      return `task-${nextId}`;
+    },
+  };
+  // Push task first: reader uf8 -> target push
+  const mission = createMission(
+    1_000,
+    ["uf8", "push", "streamdeck"],
+    dependencies,
+  );
+  mission.level = 2;
+  const firstTask = orders(mission).tasks[0];
+  if (firstTask === undefined) {
+    throw new Error("Mission has no tasks");
+  }
+  fn = typeof roller === "function" ? roller : () => roller;
+  advanceMission(mission, firstTask.deadlineAt, dependencies);
+  return { mission, dependencies };
+}
+
+describe("push console activity", () => {
+  test("rolls a console order with 16 unique labels", () => {
+    const { mission } = levelTwoPushTask(0.8);
+    const task = taskOfKind(orders(mission), "push-console");
+
+    expect(task.labels).toHaveLength(16);
+    expect(new Set(task.labels).size).toBe(16);
+    expect(task.action.kind).toBe("press");
+    expect(task.verbDone).toBe(false);
+    expect(task.labelDone).toBe(false);
+  });
+
+  test("completes a press order with verb and label in either order", () => {
+    const { mission, dependencies } = levelTwoPushTask(0.8);
+    const task = taskOfKind(orders(mission), "push-console");
+    if (task.action.kind !== "press") {
+      throw new Error("Expected a press action");
+    }
+
+    expect(
+      applyHardwareEvent(
+        mission,
+        { kind: "push-console-label", index: task.targetIndex },
+        20_000,
+        dependencies,
+      ).outcomes,
+    ).toEqual([]);
+
+    const update = applyHardwareEvent(
+      mission,
+      { kind: "push-console-verb", cc: task.action.verbCc },
+      20_100,
+      dependencies,
+    );
+
+    expect(update.outcomes[0]?.kind).toBe("completed");
+  });
+
+  test("a wrong control is a mistake and resets the order", () => {
+    const { mission, dependencies } = levelTwoPushTask(0.8);
+    const task = taskOfKind(orders(mission), "push-console");
+    const integrityBefore = mission.integrity;
+
+    applyHardwareEvent(
+      mission,
+      { kind: "push-console-label", index: task.targetIndex },
+      20_000,
+      dependencies,
+    );
+    const update = applyHardwareEvent(
+      mission,
+      { kind: "push-console-label", index: (task.targetIndex + 1) % 16 },
+      20_100,
+      dependencies,
+    );
+
+    expect(update.outcomes[0]?.kind).toBe("mistake");
+    expect(mission.integrity).toBeLessThan(integrityBefore);
+    expect(task.labelDone).toBe(false);
+  });
+
+  test("a scale order completes when the dial reaches the target", () => {
+    // Replacement rolls: roll, 16 labels, verb, then the action roll
+    // at call 19 (0.3 -> scale).
+    let calls = -1;
+    const { mission, dependencies } = levelTwoPushTask(() => {
+      calls += 1;
+      return calls === 19 ? 0.3 : 0.8;
+    });
+    const task = taskOfKind(orders(mission), "push-console");
+    if (task.action.kind !== "scale") {
+      throw new Error("Expected a scale action");
+    }
+
+    applyHardwareEvent(
+      mission,
+      { kind: "push-console-verb", cc: 58 }, // SCALES
+      20_000,
+      dependencies,
+    );
+    applyHardwareEvent(
+      mission,
+      { kind: "push-console-label", index: task.targetIndex },
+      20_100,
+      dependencies,
+    );
+
+    const wrongValue = task.action.value - 1;
+    expect(
+      applyHardwareEvent(
+        mission,
+        { kind: "push-console-set", value: wrongValue },
+        20_200,
+        dependencies,
+      ).outcomes,
+    ).toEqual([]);
+    expect(task.value).toBe(wrongValue);
+
+    const update = applyHardwareEvent(
+      mission,
+      { kind: "push-console-set", value: task.action.value },
+      20_300,
+      dependencies,
+    );
+    expect(update.outcomes[0]?.kind).toBe("completed");
+  });
+});
+
+describe("push review activity", () => {
+  // 0.6 lands in the level-2 review band and picks decision "save".
+  test("rolls an announcement with a decision", () => {
+    const { mission } = levelTwoPushTask(0.6);
+    const task = taskOfKind(orders(mission), "push-review");
+
+    expect(task.subject.length).toBeGreaterThan(0);
+    expect(task.verb.length).toBeGreaterThan(0);
+    expect(task.decision).toBe("save");
+  });
+
+  test("the ordered choice completes it; the other is a mistake", () => {
+    const { mission, dependencies } = levelTwoPushTask(0.6);
+    const task = taskOfKind(orders(mission), "push-review");
+    const integrityBefore = mission.integrity;
+
+    const wrong = applyHardwareEvent(
+      mission,
+      { kind: "push-review-choice", choice: "undo" },
+      20_000,
+      dependencies,
+    );
+    expect(wrong.outcomes[0]?.kind).toBe("mistake");
+    expect(mission.integrity).toBeLessThan(integrityBefore);
+
+    const update = applyHardwareEvent(
+      mission,
+      { kind: "push-review-choice", choice: task.decision },
+      20_100,
+      dependencies,
+    );
+    expect(update.outcomes[0]?.kind).toBe("completed");
+  });
+});
+
+describe("push cow activity", () => {
+  // 0.7 lands in the level-2 cow band and picks action "release".
+  test("rolls a tractor beam order", () => {
+    const { mission } = levelTwoPushTask(0.7);
+    const task = taskOfKind(orders(mission), "push-cow");
+
+    expect(task.action).toBe("release");
+  });
+
+  test("the reported direction decides the outcome", () => {
+    const { mission, dependencies } = levelTwoPushTask(0.7);
+    const task = taskOfKind(orders(mission), "push-cow");
+    const integrityBefore = mission.integrity;
+
+    const wrong = applyHardwareEvent(
+      mission,
+      { kind: "push-cow-done", action: "abduct" },
+      20_000,
+      dependencies,
+    );
+    expect(wrong.outcomes[0]?.kind).toBe("mistake");
+    expect(mission.integrity).toBeLessThan(integrityBefore);
+
+    const update = applyHardwareEvent(
+      mission,
+      { kind: "push-cow-done", action: task.action },
+      20_100,
+      dependencies,
+    );
+    expect(update.outcomes[0]?.kind).toBe("completed");
+  });
+});
+
 describe("level progression and interstitials", () => {
   test("clears a quota into one focused six-second interstitial", () => {
     const dependencies = deterministicDependencies();

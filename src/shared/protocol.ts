@@ -385,6 +385,26 @@ function parseHardwareEvent(value: unknown): HardwareEvent | null {
     }
     case "push-defend-failed":
       return { kind: "push-defend-failed" };
+    case "push-console-verb":
+      return isIntegerInRange(value.cc, 0, 127)
+        ? { kind: "push-console-verb", cc: value.cc }
+        : null;
+    case "push-console-label":
+      return isIntegerInRange(value.index, 0, 15)
+        ? { kind: "push-console-label", index: value.index }
+        : null;
+    case "push-console-set":
+      return isIntegerInRange(value.value, 0, 8)
+        ? { kind: "push-console-set", value: value.value }
+        : null;
+    case "push-review-choice":
+      return isOneOf(value.choice, ["undo", "save"])
+        ? { kind: "push-review-choice", choice: value.choice }
+        : null;
+    case "push-cow-done":
+      return isOneOf(value.action, ["abduct", "release"])
+        ? { kind: "push-cow-done", action: value.action }
+        : null;
     default:
       return null;
   }
@@ -606,6 +626,10 @@ type JsonRecord = {
   name?: unknown;
   station?: unknown;
   event?: unknown;
+  cc?: unknown;
+  index?: unknown;
+  choice?: unknown;
+  action?: unknown;
   message?: unknown;
   snapshot?: unknown;
   kind?: unknown;

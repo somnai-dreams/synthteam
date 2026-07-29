@@ -18,6 +18,9 @@ export type MissionLevelProfile = {
   pushGridSize: number;
   streamDeckSequenceChance: number;
   pushDefendChance: number;
+  pushConsoleChance: number;
+  pushCowChance: number;
+  pushReviewChance: number;
   pushPathLength: number;
   taskDurationMs: number;
   uf8Tolerance: number;
@@ -35,6 +38,9 @@ export const MISSION_LEVEL_PROFILES = [
     pushGridSize: 3,
     streamDeckSequenceChance: 0,
     pushDefendChance: 0,
+    pushConsoleChance: 0.0,
+    pushCowChance: 0.0,
+    pushReviewChance: 0.0,
     pushPathLength: 3,
     taskDurationMs: 15_000,
     uf8Tolerance: 4,
@@ -50,6 +56,9 @@ export const MISSION_LEVEL_PROFILES = [
     pushGridSize: 4,
     streamDeckSequenceChance: 0.25,
     pushDefendChance: 0,
+    pushConsoleChance: 0.25,
+    pushCowChance: 0.1,
+    pushReviewChance: 0.1,
     pushPathLength: 3,
     taskDurationMs: 14_000,
     uf8Tolerance: 4,
@@ -65,6 +74,9 @@ export const MISSION_LEVEL_PROFILES = [
     pushGridSize: 6,
     streamDeckSequenceChance: 0.4,
     pushDefendChance: 0,
+    pushConsoleChance: 0.25,
+    pushCowChance: 0.1,
+    pushReviewChance: 0.1,
     pushPathLength: 4,
     taskDurationMs: 13_000,
     uf8Tolerance: 3,
@@ -80,6 +92,9 @@ export const MISSION_LEVEL_PROFILES = [
     pushGridSize: 8,
     streamDeckSequenceChance: 0.5,
     pushDefendChance: 0.2,
+    pushConsoleChance: 0.2,
+    pushCowChance: 0.1,
+    pushReviewChance: 0.1,
     pushPathLength: 5,
     taskDurationMs: 12_000,
     uf8Tolerance: 3,
@@ -95,6 +110,9 @@ export const MISSION_LEVEL_PROFILES = [
     pushGridSize: 8,
     streamDeckSequenceChance: 0.6,
     pushDefendChance: 0.35,
+    pushConsoleChance: 0.2,
+    pushCowChance: 0.05,
+    pushReviewChance: 0.05,
     pushPathLength: 6,
     taskDurationMs: 11_000,
     uf8Tolerance: 2,
@@ -293,14 +311,65 @@ export type PushDefendTask = TaskBase & {
   hull: number; // segments the bridge starts with
 };
 
-export type ActivePushTask = PushPathTask | PushDefendTask;
+/**
+ * The verb of a console order is a real labelled button on the Push
+ * (QUANTIZE, MUTE, DUPLICATE, ...). Scale orders use the SCALES
+ * button plus the big dial.
+ */
+export type PushConsoleAction =
+  | { kind: "press"; verb: string; verbCc: number }
+  | { kind: "scale"; value: number };
+
+export type PushConsoleTask = TaskBase & {
+  kind: "push-console";
+  /** 16 labels: 0-7 above the display, 8-15 below it. */
+  labels: readonly string[];
+  targetIndex: number;
+  action: PushConsoleAction;
+  verbDone: boolean;
+  labelDone: boolean;
+  /** Big-dial counter while a scale order is dialing (starts at 0). */
+  value: number;
+};
+
+/**
+ * A snap judgement: the Push screen announces "<subject> <verb>!"
+ * (e.g. WORMHOLE DELETED) and the shouted order says whether to
+ * UNDO it or SAVE it — pressed on the Push's real Undo/Save buttons.
+ */
+export type PushReviewTask = TaskBase & {
+  kind: "push-review";
+  subject: string;
+  verb: string; // past tense: DELETED, SCRAMBLED, ...
+  decision: "undo" | "save";
+};
+
+/**
+ * Tractor-beam duty: something is caught in the beam. The phone order
+ * says whether to ABDUCT it (slide the touch strip up) or RELEASE it
+ * (slide down). What's in the beam stays hidden until it moves.
+ */
+export type PushCowTask = TaskBase & {
+  kind: "push-cow";
+  action: "abduct" | "release";
+};
+
+export type ActivePushTask =
+  | PushPathTask
+  | PushDefendTask
+  | PushConsoleTask
+  | PushReviewTask
+  | PushCowTask;
 
 export type ActiveTask =
   | StreamDeckRouteTask
   | StreamDeckSequenceTask
   | Uf8FaderTask
   | PushPathTask
-  | PushDefendTask;
+  | PushDefendTask
+  | PushConsoleTask
+  | PushReviewTask
+  | PushCowTask;
 
 export type OrdersActivity = {
   kind: "orders";
@@ -395,11 +464,41 @@ export type PushDefendFailedEvent = {
   kind: "push-defend-failed";
 };
 
+export type PushConsoleVerbEvent = {
+  kind: "push-console-verb";
+  cc: number;
+};
+
+export type PushConsoleLabelEvent = {
+  kind: "push-console-label";
+  index: number;
+};
+
+export type PushConsoleSetEvent = {
+  kind: "push-console-set";
+  value: number;
+};
+
+export type PushReviewChoiceEvent = {
+  kind: "push-review-choice";
+  choice: "undo" | "save";
+};
+
+export type PushCowDoneEvent = {
+  kind: "push-cow-done";
+  action: "abduct" | "release";
+};
+
 export type HardwareEvent =
   | StreamDeckHardwareEvent
   | Uf8HardwareEvent
   | PushHardwareEvent
-  | PushDefendFailedEvent;
+  | PushDefendFailedEvent
+  | PushConsoleVerbEvent
+  | PushConsoleLabelEvent
+  | PushConsoleSetEvent
+  | PushReviewChoiceEvent
+  | PushCowDoneEvent;
 
 export type MissionState = {
   startedAt: number;
@@ -484,6 +583,9 @@ export function stationForTask(task: ActiveTask): Station {
       return "uf8";
     case "push-path":
     case "push-defend":
+    case "push-console":
+    case "push-review":
+    case "push-cow":
       return "push";
   }
 }
@@ -526,5 +628,20 @@ export function describeTask(
       return `TRACE THE ${task.color.toUpperCase()} VECTOR`;
     case "push-defend":
       return "DEFEND THE MOTHERSHIP";
+    case "push-console": {
+      const label = task.labels[task.targetIndex];
+      if (label === undefined) {
+        throw new Error("Console task target is outside its labels");
+      }
+      return task.action.kind === "scale"
+        ? `SCALE ${label} TO ${task.action.value}`
+        : `${task.action.verb} ${label}`;
+    }
+    case "push-review":
+      return `${task.decision.toUpperCase()} "${task.subject} ${task.verb}"`;
+    case "push-cow":
+      return task.action === "abduct"
+        ? "ABDUCT THE COW"
+        : "RELEASE THE COW";
   }
 }

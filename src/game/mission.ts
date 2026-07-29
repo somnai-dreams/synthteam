@@ -11,6 +11,7 @@ import type {
   MissionStations,
   MissionUpdate,
   OrdersActivity,
+  PushConsoleTask,
   PushPathColor,
   ReactorProcedureActivity,
   Station,
@@ -42,7 +43,69 @@ const REACTOR_PROCEDURE_POINTS = 500;
 const REACTOR_PROCEDURE_DURATION_MS = 20_000;
 const REACTOR_HOLD_MS = 650;
 const UF8_BOTTOM_THRESHOLD = 5;
+
+// Console orders take a lot more time than a pad trace.
+const PUSH_CONSOLE_DURATION_MS = 30_000;
 const PUSH_DEFEND_HULL = 8;
+
+// Console orders: the verb is a real labelled Push button; SCALES is
+// reserved for scale-to-N orders driven by the big dial.
+export const PUSH_SCALES_CC = 58;
+const PUSH_CONSOLE_VERBS = [
+  { verb: "QUANTIZE", cc: 116 },
+  { verb: "MUTE", cc: 60 },
+  { verb: "SOLO", cc: 61 },
+  { verb: "DUPLICATE", cc: 88 },
+  { verb: "DELETE", cc: 118 },
+  { verb: "REPEAT", cc: 56 },
+  { verb: "ACCENT", cc: 57 },
+  { verb: "CONVERT", cc: 35 },
+  { verb: "AUTOMATE", cc: 89 },
+  { verb: "LOCK", cc: 83 },
+] as const;
+
+// Past-tense verbs for the review activity's announcements.
+const PUSH_REVIEW_VERBS = [
+  "DELETED",
+  "PURGED",
+  "SCRAMBLED",
+  "INVERTED",
+  "DUPLICATED",
+  "POLARIZED",
+  "ENCRYPTED",
+  "REROUTED",
+  "LIQUEFIED",
+  "VENTED",
+] as const;
+
+// Sci-fi component names sized to fit a display label cell
+// (up to two words, each 9 characters or fewer).
+const PUSH_CONSOLE_LABELS = [
+  "HIGGS BOSON",
+  "FLUX COIL",
+  "TACHYON",
+  "GRAVITON",
+  "DARK MATTER",
+  "ION FEED",
+  "WARP CORE",
+  "PLASMA GATE",
+  "NEUTRINO",
+  "QUARK BUS",
+  "PHOTON RAIL",
+  "MUON TRAP",
+  "AXION PUMP",
+  "ENTROPY SINK",
+  "POSITRON",
+  "ANTIMATTER",
+  "WORMHOLE",
+  "PULSAR VANE",
+  "QUASAR",
+  "NEBULA DUCT",
+  "ZERO POINT",
+  "DILITHIUM",
+  "EPSILON BUS",
+  "PHASE LOOP",
+] as const;
 
 const STREAM_DECK_LABELS = [
   "BERYL",
@@ -476,7 +539,46 @@ function createPushTask(
   dependencies: MissionDependencies,
   profile: MissionLevelProfile,
 ): ActiveTask {
-  if (dependencies.random() > 1 - profile.pushDefendChance) {
+  // Cumulative chance bands from the top of the roll, all level-driven
+  const roll = dependencies.random();
+  const defendFloor = 1 - profile.pushDefendChance;
+  const consoleFloor = defendFloor - profile.pushConsoleChance;
+  const cowFloor = consoleFloor - profile.pushCowChance;
+  const reviewFloor = cowFloor - profile.pushReviewChance;
+  if (roll > consoleFloor && roll <= defendFloor) {
+    return createPushConsoleTask(reader, now, dependencies, profile);
+  }
+  if (roll > cowFloor && roll <= consoleFloor) {
+    return {
+      kind: "push-cow",
+      id: dependencies.makeId(),
+      reader,
+      createdAt: now,
+      deadlineAt: now + profile.taskDurationMs,
+      action: dependencies.random() < 0.5 ? "abduct" : "release",
+    };
+  }
+  if (roll > reviewFloor && roll <= cowFloor) {
+    const subject =
+      PUSH_CONSOLE_LABELS[
+        randomInteger(dependencies.random, 0, PUSH_CONSOLE_LABELS.length - 1)
+      ] ?? "WORMHOLE";
+    const verb =
+      PUSH_REVIEW_VERBS[
+        randomInteger(dependencies.random, 0, PUSH_REVIEW_VERBS.length - 1)
+      ] ?? "DELETED";
+    return {
+      kind: "push-review",
+      id: dependencies.makeId(),
+      reader,
+      createdAt: now,
+      deadlineAt: now + profile.taskDurationMs,
+      subject,
+      verb,
+      decision: dependencies.random() < 0.5 ? "undo" : "save",
+    };
+  }
+  if (roll > defendFloor) {
     return {
       kind: "push-defend",
       id: dependencies.makeId(),
@@ -503,6 +605,49 @@ function createPushTask(
       profile.pushPathLength,
     ),
     progress: 0,
+  };
+}
+
+function createPushConsoleTask(
+  reader: Station,
+  now: number,
+  dependencies: MissionDependencies,
+  profile: MissionLevelProfile,
+): ActiveTask {
+  // Sample 16 labels from the pool without repeats.
+  const pool = [...PUSH_CONSOLE_LABELS];
+  const labels: string[] = [];
+  while (labels.length < 16) {
+    const pick = randomInteger(dependencies.random, 0, pool.length - 1);
+    const [label] = pool.splice(pick, 1);
+    if (label === undefined) {
+      throw new Error("Console label pool ran dry");
+    }
+    labels.push(label);
+  }
+  const verbPick = PUSH_CONSOLE_VERBS[
+    randomInteger(dependencies.random, 0, PUSH_CONSOLE_VERBS.length - 1)
+  ];
+  if (verbPick === undefined) {
+    throw new Error("Console verb pick is missing");
+  }
+  return {
+    kind: "push-console",
+    id: dependencies.makeId(),
+    reader,
+    createdAt: now,
+    // Console orders need much more time than a pad trace
+    deadlineAt:
+      now + Math.max(PUSH_CONSOLE_DURATION_MS, profile.taskDurationMs),
+    labels,
+    targetIndex: randomInteger(dependencies.random, 0, 15),
+    action:
+      dependencies.random() < 0.4
+        ? { kind: "scale", value: randomInteger(dependencies.random, 1, 8) }
+        : { kind: "press", verb: verbPick.verb, verbCc: verbPick.cc },
+    verbDone: false,
+    labelDone: false,
+    value: 0,
   };
 }
 
@@ -663,7 +808,65 @@ function applyEventToTask(
 
     case "push-defend":
       return "ignored";
+
+    case "push-console": {
+      // Verb and label may land in either order; the dial counter
+      // completes a scale order the moment it reaches the target.
+      if (event.kind === "push-console-verb") {
+        const wantedCc =
+          task.action.kind === "scale" ? PUSH_SCALES_CC : task.action.verbCc;
+        if (event.cc !== wantedCc) {
+          task.verbDone = false;
+          task.labelDone = false;
+          return "mistake";
+        }
+        task.verbDone = true;
+        return finishConsolePress(task);
+      }
+      if (event.kind === "push-console-label") {
+        if (event.index !== task.targetIndex) {
+          task.verbDone = false;
+          task.labelDone = false;
+          return "mistake";
+        }
+        task.labelDone = true;
+        return finishConsolePress(task);
+      }
+      if (event.kind === "push-console-set") {
+        if (
+          task.action.kind !== "scale" ||
+          !task.verbDone ||
+          !task.labelDone
+        ) {
+          return "ignored";
+        }
+        task.value = event.value;
+        return event.value === task.action.value ? "completed" : "progress";
+      }
+      return "ignored";
+    }
+
+    case "push-review":
+      if (event.kind !== "push-review-choice") {
+        return "ignored";
+      }
+      return event.choice === task.decision ? "completed" : "mistake";
+
+    case "push-cow":
+      // The bridge simulates the beam; it reports which way the cow
+      // ended up. The wrong direction is a mistake.
+      if (event.kind !== "push-cow-done") {
+        return "ignored";
+      }
+      return event.action === task.action ? "completed" : "mistake";
   }
+}
+
+function finishConsolePress(task: PushConsoleTask): TaskEventResult {
+  if (!task.verbDone || !task.labelDone) {
+    return "progress";
+  }
+  return task.action.kind === "press" ? "completed" : "progress";
 }
 
 function applyInterstitialEvent(
@@ -1016,6 +1219,14 @@ function isEventActive(
       return isActivePushPoint(profile, event.point);
     case "push-defend-failed":
       return profile.pushDefendChance > 0;
+    case "push-console-verb":
+    case "push-console-label":
+    case "push-console-set":
+      return profile.pushConsoleChance > 0;
+    case "push-review-choice":
+      return profile.pushReviewChance > 0;
+    case "push-cow-done":
+      return profile.pushCowChance > 0;
   }
 }
 
@@ -1027,6 +1238,11 @@ function stationForEvent(event: HardwareEvent): Station {
       return "uf8";
     case "push-pad":
     case "push-defend-failed":
+    case "push-console-verb":
+    case "push-console-label":
+    case "push-console-set":
+    case "push-review-choice":
+    case "push-cow-done":
       return "push";
   }
 }
