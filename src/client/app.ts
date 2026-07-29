@@ -513,6 +513,37 @@ const GAME_INFO: Record<GameTaskKind, GameInfo> = {
   },
 };
 
+/**
+ * UF8 activities are always on (the UF8 has no togglable variants), so
+ * they live outside GameTaskKind — but they still belong in the guide.
+ */
+const UF8_GUIDE_INFO: readonly GameInfo[] = [
+  {
+    name: "Fader order",
+    station: "uf8",
+    order: "SET COOLANT TO -20 DB",
+    description:
+      "Move the named channel's fader to the called dB stop and hold it there until it registers.",
+    preview: `<span class="pv-faders"><i></i><i class="on"></i><i></i><i></i></span><span class="pv-chip">-20 DB</span>`,
+  },
+  {
+    name: "Bottom out",
+    station: "uf8",
+    order: "ALL FADERS TO −INF",
+    description:
+      "Level transition solo: pull every fader down to the bottom of its throw before the timer runs out.",
+    preview: `<span class="pv-faders pv-low"><i></i><i></i><i></i><i></i></span><span class="pv-chip">−INF</span>`,
+  },
+  {
+    name: "Reactor calibration",
+    station: "uf8",
+    order: "REACTOR CODE BETA",
+    description:
+      "The CORE PRESSURE display shows a code; another phone holds the calibration table. Set COOLANT and DRIFT to the matching row's stops and hold both.",
+    preview: `<span class="pv-chip pv-verb">BETA</span><span class="pv-strip"><i>COOLANT -20</i><i>DRIFT -60</i></span>`,
+  },
+];
+
 function gameSettingsMarkup(consoleSnapshot: ConsoleSnapshot): string {
   const settings = consoleSnapshot.activitySettings;
   const groups: Record<string, GameTaskKind[]> = {};
@@ -589,9 +620,12 @@ function gameGuideMarkup(): string {
         <h2>Every order type</h2>
       </div>
       <div class="guide-grid">
-        ${GAME_TASK_KINDS.map((kind) => {
-          const info = GAME_INFO[kind];
-          return `
+        ${[...GAME_TASK_KINDS.map((kind) => GAME_INFO[kind]), ...UF8_GUIDE_INFO]
+          .sort(
+            (a, b) => STATIONS.indexOf(a.station) - STATIONS.indexOf(b.station),
+          )
+          .map((info) => {
+            return `
           <article class="guide-card station-${info.station}">
             <div class="guide-preview">${info.preview}</div>
             <div class="guide-copy">
