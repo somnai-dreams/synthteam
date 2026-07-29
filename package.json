@@ -1,0 +1,19 @@
+{
+  "name": "synthteam",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build --target=bun --outdir=dist src/server/index.ts",
+    "check": "tsc && oxlint --type-aware --deny-warnings src",
+    "dev": "bun --hot src/server/index.ts",
+    "start": "bun src/server/index.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "oxlint": "latest",
+    "oxlint-tsgolint": "latest",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,61 @@
+# Synthteam MVP
+
+Synthteam is a local, three-player coordination game built around three
+different physical control surfaces. One laptop owns the hardware and runs the
+Bun server. Each player reads private orders on a phone and shouts them to the
+player standing at the controller that can complete them.
+
+## Physical topology
+
+```text
+Phone: Deck crew ─┐
+Phone: UF8 crew ──┼─ Wi-Fi ─> central Bun server
+Phone: Push crew ─┘                 │
+                                    ├─ Stream Deck XL plugin
+                                    ├─ SSL UF8 MIDI CC layer
+                                    └─ Ableton Push User MIDI port
+```
+
+Phones never submit control actions. During a mission, valid actions can only
+arrive through a hardware adapter or the explicitly labelled development
+simulator in the central console.
+
+## Controller-specific gameplay
+
+### Stream Deck XL: routing and communications
+
+The 32 LCD keys form a dynamic switchboard. The first MVP task asks the operator
+to press a named source key followed by a named destination key. Later tasks can
+add holds, chords, and ordered sequences without changing the game protocol.
+
+### SSL UF8: reactor and propulsion
+
+The eight motorized faders are continuous system levels. The first MVP task asks
+the operator to move a named channel into a target band and hold it there. The
+MIDI CC layer is the initial integration surface; MCU/HUI display and motor
+feedback are deliberately deferred until input behavior is proven.
+
+### Ableton Push: navigation and sensors
+
+The 8×8 pad matrix is a spatial console. The first MVP task lights a short path
+that the operator must trace in order. Push generation-specific discovery is a
+hardware calibration concern, not a reason to flatten the task into a generic
+button command.
+
+## Mission rules
+
+- There is one phone/crew slot per controller.
+- Every phone receives an order for a different controller.
+- Three orders run concurrently during a 90-second mission.
+- Completing an order scores points, raises the combo, and repairs a small
+  amount of integrity.
+- A wrong discrete action costs a little integrity and resets that task's
+  progress.
+- An expired order costs significant integrity and is immediately replaced.
+- The mission succeeds when time expires and fails when integrity reaches zero.
+
+## MVP gate
+
+The MVP is proven when three players can join from phones and complete a
+90-second mission using the three physical devices without touching the central
+laptop after launch.
