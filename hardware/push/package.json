@@ -1,0 +1,13 @@
+{
+  "name": "synthteam-push-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun bridge.js"
+  },
+  "dependencies": {
+    "@julusian/midi": "^3.8.0",
+    "usb": "^2.16.0"
+  },
+  "trustedDependencies": ["usb", "@julusian/midi"]
+}

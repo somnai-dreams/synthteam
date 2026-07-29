@@ -60,7 +60,8 @@ grid learning needed. See `hardware/push/README.md`:
 
 ```sh
 cd hardware/push
-uv run bridge.py
+bun install
+bun bridge.js
 ```
 
 **Web MIDI via the console (any Push generation).**
