@@ -102,6 +102,11 @@ bun run probe:uf8 zero-faders
 If multiple units are present, append `--serial SERIAL`. The probe intentionally
 does not store a device serial in the repository.
 
+The display test performs the recovered identity, tile-init, and display-init
+sequence before drawing, then holds the direct USB session open for 30 seconds.
+Use `--hold-seconds N` to change that inspection window. Closing the session
+returns the UF8 to its host-loss screen until SSL 360 reconnects.
+
 `bun:ffi` is experimental, so this adapter is currently a hardware validation
 surface rather than the production mission transport. Once input event decoding
 is recovered, a small native ABI shim is the likely durable replacement.

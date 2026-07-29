@@ -16,6 +16,21 @@ describe("UF8 serial protocol", () => {
     );
   });
 
+  test("frames the read-only identity and runtime init sequence", () => {
+    expect(frameUf8Message(1, [])).toEqual(
+      new Uint8Array([0xff, 1, 0, 1]),
+    );
+    expect(frameUf8Message(2, [])).toEqual(
+      new Uint8Array([0xff, 2, 0, 2]),
+    );
+    expect(frameUf8Message(5, [])).toEqual(
+      new Uint8Array([0xff, 5, 0, 5]),
+    );
+    expect(frameUf8Message(100, [0])).toEqual(
+      new Uint8Array([0xff, 100, 1, 0, 101]),
+    );
+  });
+
   test("encodes RGB565 display colours in little-endian order", () => {
     expect(rgb565(255, 0, 255)).toBe(0xf81f);
     expect(setUf8DisplayColour(2, 0xf81f)).toEqual(

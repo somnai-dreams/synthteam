@@ -5,6 +5,7 @@ import {
 import {
   drawUf8DisplayBox,
   drawUf8DisplayText,
+  frameUf8Message,
   rgb565,
   setUf8DisplayColour,
   setUf8FaderMotorEnabled,
@@ -50,8 +51,11 @@ async function main(): Promise<void> {
       return;
     case "display-test":
       await withSelectedUf8(async (device) => {
+        await beginHostSession(device);
         drawDisplayTest(device);
-        await Bun.sleep(250);
+        const holdSeconds = readPositiveIntegerOption("--hold-seconds", 30);
+        console.log(`Holding the direct UF8 session for ${holdSeconds} seconds`);
+        await Bun.sleep(holdSeconds * 1000);
       });
       return;
     case "zero-faders":
@@ -132,6 +136,20 @@ function drawDisplayTest(device: Uf8D2xxDevice): void {
   console.log("Drew eight colour-coded control labels");
 }
 
+async function beginHostSession(device: Uf8D2xxDevice): Promise<void> {
+  const startupFrames = [
+    frameUf8Message(1, []),
+    frameUf8Message(2, []),
+    frameUf8Message(5, []),
+    frameUf8Message(100, [0]),
+  ];
+  for (const frame of startupFrames) {
+    device.write(frame);
+    await Bun.sleep(50);
+  }
+  console.log("Sent UF8 identity, tile-init, and display-init sequence");
+}
+
 function displayTestFrames(displayIndex: number): readonly Uint8Array[] {
   const colour = displayColours[displayIndex];
   const label = displayLabels[displayIndex];
@@ -188,6 +206,19 @@ function parseCommand(value: string | undefined): Command {
     default:
       throw new Error(`Unknown UF8 probe command: ${value}`);
   }
+}
+
+function readPositiveIntegerOption(name: string, fallback: number): number {
+  const optionIndex = Bun.argv.indexOf(name);
+  if (optionIndex === -1) {
+    return fallback;
+  }
+  const rawValue = Bun.argv[optionIndex + 1];
+  const value = rawValue === undefined ? Number.NaN : Number(rawValue);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} requires a positive integer`);
+  }
+  return value;
 }
 
 function toHex(frame: Uint8Array): string {
