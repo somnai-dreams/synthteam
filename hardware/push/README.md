@@ -33,9 +33,10 @@ interstitial. In the lobby the screen shows link status; game over shows the
 result.
 
 The bridge consumes the publishable TypeScript
-`@somnai-dreams/ableton-push` workspace package for pads, buttons, encoders, the
-touch strip, LEDs, and direct RGBA display frames. `bridge.js` contains only
-the Synthteam client and game rendering; `font.js` renders its text.
+[`@somnai-dreams/ableton-push`](https://github.com/somnai-dreams/ableton-push/tree/v0.1.0)
+package for pads, buttons, encoders, the touch strip, LEDs, and direct RGBA
+display frames. `bridge.js` contains only the Synthteam client and game
+rendering; `font.js` renders its text.
 
 The Push 3 exposes the same USB display protocol as the Push 2
 (Ableton's push-interface docs apply); only the USB product id differs.

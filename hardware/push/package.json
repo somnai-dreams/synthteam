@@ -6,7 +6,7 @@
     "start": "bun bridge.js"
   },
   "dependencies": {
-    "@somnai-dreams/ableton-push": "workspace:*"
+    "@somnai-dreams/ableton-push": "git+https://github.com/somnai-dreams/ableton-push.git#v0.1.0"
   },
   "trustedDependencies": ["usb", "@julusian/midi"]
 }

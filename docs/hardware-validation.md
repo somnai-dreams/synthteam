@@ -58,7 +58,7 @@ Direct hardware execution requires pausing SSL 360 because its core owns the
 same USB interface exclusively.
 
 See
-[`packages/ssl-uf8/PROTOCOL.md`](../packages/ssl-uf8/PROTOCOL.md)
+[`somnai-dreams/ssl-uf8`](https://github.com/somnai-dreams/ssl-uf8/blob/v0.1.0/PROTOCOL.md)
 for the exact evidence boundary.
 
 ## 2026-07-28 · server-owned UF8 mission pass
