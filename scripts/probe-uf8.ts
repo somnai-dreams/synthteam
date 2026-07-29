@@ -54,8 +54,7 @@ async function main(): Promise<void> {
         await beginHostSession(device);
         drawDisplayTest(device);
         const holdSeconds = readPositiveIntegerOption("--hold-seconds", 30);
-        console.log(`Holding the direct UF8 session for ${holdSeconds} seconds`);
-        await Bun.sleep(holdSeconds * 1000);
+        await pumpHostSession(device, holdSeconds);
       });
       return;
     case "zero-faders":
@@ -146,8 +145,28 @@ async function beginHostSession(device: Uf8D2xxDevice): Promise<void> {
   for (const frame of startupFrames) {
     device.write(frame);
     await Bun.sleep(50);
+    device.readAvailable();
   }
   console.log("Sent UF8 identity, tile-init, and display-init sequence");
+}
+
+async function pumpHostSession(
+  device: Uf8D2xxDevice,
+  holdSeconds: number,
+): Promise<void> {
+  console.log(
+    `Holding the direct UF8 session for ${holdSeconds} seconds with a 1 Hz identity poll`,
+  );
+  const deadline = performance.now() + holdSeconds * 1000;
+  while (performance.now() < deadline) {
+    device.write(frameUf8Message(1, []));
+    await Bun.sleep(100);
+    device.readAvailable();
+    const remainingMilliseconds = deadline - performance.now();
+    if (remainingMilliseconds > 0) {
+      await Bun.sleep(Math.min(900, remainingMilliseconds));
+    }
+  }
 }
 
 function displayTestFrames(displayIndex: number): readonly Uint8Array[] {
@@ -170,7 +189,7 @@ function displayTestFrames(displayIndex: number): readonly Uint8Array[] {
     drawUf8DisplayText(
       displayIndex,
       4,
-      5,
+      18,
       label,
       "dejavu-sans-bold-14",
     ),

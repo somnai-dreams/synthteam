@@ -104,7 +104,9 @@ does not store a device serial in the repository.
 
 The display test performs the recovered identity, tile-init, and display-init
 sequence before drawing, then holds the direct USB session open for 30 seconds.
-Use `--hold-seconds N` to change that inspection window. Closing the session
+Use `--hold-seconds N` to change that inspection window. While held, the probe
+drains controller replies and sends a read-only identity query once per second.
+Closing the session
 returns the UF8 to its host-loss screen until SSL 360 reconnects.
 
 `bun:ffi` is experimental, so this adapter is currently a hardware validation

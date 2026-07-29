@@ -41,6 +41,14 @@ const d2xxSymbols = {
     args: [FFIType.u64, FFIType.ptr, FFIType.u32, FFIType.ptr],
     returns: FFIType.u32,
   },
+  FT_Read: {
+    args: [FFIType.u64, FFIType.ptr, FFIType.u32, FFIType.ptr],
+    returns: FFIType.u32,
+  },
+  FT_GetStatus: {
+    args: [FFIType.u64, FFIType.ptr, FFIType.ptr, FFIType.ptr],
+    returns: FFIType.u32,
+  },
   FT_SetBaudRate: {
     args: [FFIType.u64, FFIType.u32],
     returns: FFIType.u32,
@@ -168,6 +176,45 @@ export class Uf8D2xxDevice {
         `FT_Write sent ${bytesWritten[0]} of ${frame.byteLength} UF8 bytes`,
       );
     }
+  }
+
+  readAvailable(): Uint8Array {
+    if (this.#closed) {
+      throw new Error("Cannot read from a closed UF8");
+    }
+    const receiveBytes = new Uint32Array(1);
+    const transmitBytes = new Uint32Array(1);
+    const eventStatus = new Uint32Array(1);
+    assertD2xxStatus(
+      "FT_GetStatus",
+      this.#library.symbols.FT_GetStatus(
+        this.#handle,
+        receiveBytes,
+        transmitBytes,
+        eventStatus,
+      ),
+    );
+    const byteCount = requiredOutput("receive byte count", receiveBytes[0]);
+    if (byteCount === 0) {
+      return new Uint8Array();
+    }
+
+    const buffer = new Uint8Array(byteCount);
+    const bytesRead = new Uint32Array(1);
+    assertD2xxStatus(
+      "FT_Read",
+      this.#library.symbols.FT_Read(
+        this.#handle,
+        buffer,
+        buffer.byteLength,
+        bytesRead,
+      ),
+    );
+    const readCount = requiredOutput("read byte count", bytesRead[0]);
+    if (readCount !== byteCount) {
+      throw new Error(`FT_Read received ${readCount} of ${byteCount} UF8 bytes`);
+    }
+    return buffer;
   }
 
   close(): void {
