@@ -66,6 +66,13 @@ to use independent colour coding. The discovered bitmap path means arbitrary
 art should also be possible, but its block transfer is deliberately left for a
 separate, evidence-backed slice.
 
+The direct runtime adds a lightweight panoramic reactor-comet animation beneath
+the static control content. A single coloured segment advances across four
+positions on each display at 8 Hz. Each step clears the previous segment and
+draws the next: 16 compact rectangle commands per second, with no full-screen
+redraws. Static labels and contextual mission cues remain readable while the
+animation continues.
+
 ## Motor faders
 
 Fader positions use outer message code `30` with:

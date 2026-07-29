@@ -17,6 +17,11 @@ import {
   UF8_DISPLAY_WIDTH,
   UF8_FADER_COUNT,
 } from "./protocol.ts";
+import {
+  createUf8AnimationFrames,
+  createUf8AnimationResetFrames,
+  UF8_ANIMATION_INTERVAL_MS,
+} from "./animation.ts";
 import { Uf8Session } from "./session.ts";
 
 export type Uf8DisplayStrip = {
@@ -63,6 +68,8 @@ export class Uf8Runtime {
   #stopping = false;
   #disableMotorsAt: number | null = null;
   #lastDisplaySignature = "";
+  #animationFrame = 0;
+  #nextAnimationAt = 0;
 
   constructor(callbacks: Uf8RuntimeCallbacks) {
     this.#callbacks = callbacks;
@@ -113,7 +120,12 @@ export class Uf8Runtime {
     for (const frame of createUf8DisplayFrames(view)) {
       session.write(frame);
     }
+    for (const frame of createUf8AnimationResetFrames()) {
+      session.write(frame);
+    }
     this.#lastDisplaySignature = signature;
+    this.#animationFrame = 0;
+    this.#nextAnimationAt = performance.now() + UF8_ANIMATION_INTERVAL_MS;
   }
 
   async #run(): Promise<void> {
@@ -140,6 +152,8 @@ export class Uf8Runtime {
         session = await Uf8Session.connect(device.serial);
         this.#session = session;
         this.#lastDisplaySignature = "";
+        this.#animationFrame = 0;
+        this.#nextAnimationAt = 0;
         this.#setState({ kind: "connected", serial: session.serial });
 
         while (!this.#stopping && this.#session === session) {
@@ -160,6 +174,7 @@ export class Uf8Runtime {
         }
         session?.close();
         this.#disableMotorsAt = null;
+        this.#nextAnimationAt = 0;
       }
     }
   }
@@ -183,6 +198,18 @@ export class Uf8Runtime {
         session.write(setUf8FaderMotorEnabled(index, false));
       }
       this.#disableMotorsAt = null;
+    }
+
+    const now = performance.now();
+    if (
+      this.#lastDisplaySignature !== "" &&
+      now >= this.#nextAnimationAt
+    ) {
+      for (const frame of createUf8AnimationFrames(this.#animationFrame)) {
+        session.write(frame);
+      }
+      this.#animationFrame += 1;
+      this.#nextAnimationAt = now + UF8_ANIMATION_INTERVAL_MS;
     }
   }
 
