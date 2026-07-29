@@ -1748,6 +1748,33 @@ small {
   background: var(--ink);
 }
 
+.pv-faders {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 26px;
+}
+
+.pv-faders i {
+  width: 7px;
+  height: 45%;
+  border-radius: 2px;
+  background: #131c26;
+}
+
+.pv-faders i:nth-child(2n) {
+  height: 70%;
+}
+
+.pv-faders i.on {
+  height: 85%;
+  background: var(--station);
+}
+
+.pv-faders.pv-low i {
+  height: 15%;
+}
+
 .pv-emoji {
   font-size: 22px;
 }
