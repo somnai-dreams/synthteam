@@ -21,7 +21,10 @@ import { Uf8Session } from "./session.ts";
 
 export type Uf8DisplayStrip = {
   label: string;
-  target: string | null;
+  cue: {
+    heading: string;
+    value: string;
+  } | null;
 };
 
 export type Uf8DisplayView = {
@@ -254,7 +257,7 @@ export function createUf8DisplayFrames(
         "dejavu-sans-bold-14",
       ),
     );
-    if (strip.target === null) {
+    if (strip.cue === null) {
       frames.push(
         setUf8DisplayColour(index, MUTED),
         drawUf8DisplayText(
@@ -280,15 +283,15 @@ export function createUf8DisplayFrames(
         index,
         38,
         62,
-        "TARGET",
+        strip.cue.heading,
         "dejavu-sans-bold-10",
       ),
       setUf8DisplayColour(index, WHITE),
       drawUf8DisplayText(
         index,
-        Math.max(4, 64 - strip.target.length * 4),
+        Math.max(4, 64 - strip.cue.value.length * 4),
         91,
-        strip.target,
+        strip.cue.value,
         "dejavu-sans-bold-16",
       ),
       drawUf8DisplayBox(index, 12, 116, 104, 10, accent),

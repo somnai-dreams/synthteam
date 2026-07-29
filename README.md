@@ -36,6 +36,23 @@ addresses on each phone and enter a call sign.
 The mission can start with two phones. A third phone automatically adds Push to
 the routing cycle when it joins before launch.
 
+## Mission rhythm
+
+Every mission moves through three explicit kinds of play:
+
+- **Orders** are cross-routed. A phone receives an instruction for somebody
+  else's controller and the reader must shout it across the crew.
+- **Local Overrides** are short, self-directed hardware bursts. Every active
+  phone clearly says `DO THIS YOURSELF`; Deck hits a called key, UF8 bottoms out
+  all eight faders, and Push hits all four corners.
+- **Reactor Procedures** suspend ordinary orders. The UF8 shows a diagnostic
+  code while another player's phone holds the complete calibration table. The
+  operator reports the code and the reader calls back the two required fader
+  stops.
+
+Opening and pressure Order blocks lead into the Local Override and Reactor
+Procedure respectively. Final Orders then run until the mission timer ends.
+
 ## Connect the hardware
 
 ### SSL UF8
@@ -131,9 +148,10 @@ bun run probe:uf8 preview
 ```
 
 `check` uses TypeScript 7 plus type-aware oxlint. The current tests cover
-two-and-three-device task generation, cross-routing, scoring, expiration,
-controller-specific progress, direct UF8 framing and input decoding, protocol
-validation, and Push note-grid mapping.
+two-and-three-device task generation, cross-routing, Deck hold/tap/release
+orders, Local Override transitions and penalties, the shared reactor procedure,
+scoring, expiration, direct UF8 framing and input decoding, protocol validation,
+and Push note-grid mapping.
 `probe:midi` asks macOS CoreMIDI for the exact input and output endpoints
 currently exposed to Chrome. `probe:uf8 preview` verifies direct UF8 packet
 generation without opening the controller.

@@ -1,16 +1,21 @@
 import type {
   ActivePushTask,
-  ActiveTask,
   CrewSlots,
   HardwareEvent,
+  LocalOverrideTask,
+  MissionActivity,
   MissionState,
+  ReactorProfile,
   Station,
+  StreamDeckHitOverride,
   StreamDeckKey,
   StreamDeckRouteTask,
+  StreamDeckSequenceTask,
   Uf8ConnectionState,
 } from "./domain.ts";
 import {
   describeTask,
+  REACTOR_PROFILES,
   STATIONS,
   stationForTask,
   taskForReader,
@@ -34,6 +39,7 @@ export type MissionPhaseView =
       score: number;
       integrity: number;
       combo: number;
+      activity: MissionActivity["kind"];
     }
   | {
       kind: "game-over";
@@ -41,15 +47,50 @@ export type MissionPhaseView =
       score: number;
     };
 
-export type PublicOrder = {
+type DirectiveBase = {
   id: string;
-  target: Station;
-  prompt: string;
+  startedAt: number;
   deadlineAt: number;
 };
 
+export type OrderDirective = DirectiveBase & {
+  kind: "order";
+  target: Station;
+  prompt: string;
+};
+
+export type LocalOverrideDirective = DirectiveBase & {
+  kind: "local-override";
+  station: Station;
+  prompt: string;
+};
+
+export type ReactorManualDirective = DirectiveBase & {
+  kind: "reactor-manual";
+  target: "uf8";
+  profiles: readonly ReactorProfile[];
+};
+
+export type ReactorOperatorDirective = DirectiveBase & {
+  kind: "reactor-operator";
+  station: "uf8";
+  prompt: string;
+};
+
+export type ReactorSupportDirective = DirectiveBase & {
+  kind: "reactor-support";
+  prompt: string;
+};
+
+export type PhoneDirective =
+  | OrderDirective
+  | LocalOverrideDirective
+  | ReactorManualDirective
+  | ReactorOperatorDirective
+  | ReactorSupportDirective;
+
 export type ConsoleMissionView = {
-  tasks: readonly ActiveTask[];
+  activity: MissionActivity;
   streamDeckKeys: readonly StreamDeckKey[];
 };
 
@@ -73,7 +114,7 @@ export type PhoneSnapshot = SnapshotBase & {
     crewId: string;
     station: Station;
   };
-  order: PublicOrder | null;
+  directive: PhoneDirective | null;
 };
 
 export type ConsoleSnapshot = SnapshotBase & {
@@ -110,7 +151,11 @@ export type ServerMessage =
 
 export type StreamDeckStateView = {
   keys: readonly StreamDeckKey[];
-  task: StreamDeckRouteTask | null;
+  task:
+    | StreamDeckRouteTask
+    | StreamDeckSequenceTask
+    | StreamDeckHitOverride
+    | null;
 };
 
 export type PushStateView = {
@@ -118,17 +163,87 @@ export type PushStateView = {
   task: ActivePushTask | null;
 };
 
-export function publicOrderForReader(
+export function publicDirectiveForStation(
   mission: MissionState,
-  reader: Station,
-): PublicOrder {
-  const task = taskForReader(mission, reader);
-  return {
-    id: task.id,
-    target: stationForTask(task),
-    prompt: describeTask(task, mission.streamDeckKeys),
-    deadlineAt: task.deadlineAt,
-  };
+  station: Station,
+): PhoneDirective {
+  switch (mission.activity.kind) {
+    case "orders": {
+      const task = taskForReader(mission.activity, station);
+      return {
+        kind: "order",
+        id: task.id,
+        startedAt: task.createdAt,
+        deadlineAt: task.deadlineAt,
+        target: stationForTask(task),
+        prompt: describeTask(task, mission.streamDeckKeys),
+      };
+    }
+    case "local-overrides": {
+      const task = mission.activity.tasks.find(
+        (candidate) => candidate.station === station,
+      );
+      if (task === undefined) {
+        throw new Error(`Missing local override for ${station}`);
+      }
+      return {
+        kind: "local-override",
+        id: task.id,
+        startedAt: task.startedAt,
+        deadlineAt: task.deadlineAt,
+        station,
+        prompt: localOverridePrompt(task, mission.streamDeckKeys),
+      };
+    }
+    case "reactor-procedure": {
+      const procedure = mission.activity.procedure;
+      const base = {
+        id: procedure.id,
+        startedAt: procedure.createdAt,
+        deadlineAt: procedure.deadlineAt,
+      };
+      if (station === procedure.reader) {
+        return {
+          ...base,
+          kind: "reactor-manual",
+          target: "uf8",
+          profiles: REACTOR_PROFILES,
+        };
+      }
+      if (station === "uf8") {
+        return {
+          ...base,
+          kind: "reactor-operator",
+          station,
+          prompt: "READ THE REACTOR CODE ALOUD",
+        };
+      }
+      return {
+        ...base,
+        kind: "reactor-support",
+        prompt: "HELP THE CREW CALIBRATE THE REACTOR",
+      };
+    }
+  }
+}
+
+function localOverridePrompt(
+  task: LocalOverrideTask,
+  keys: readonly StreamDeckKey[],
+): string {
+  switch (task.kind) {
+    case "streamdeck-hit": {
+      const key = keys[task.keyIndex];
+      if (key === undefined) {
+        throw new Error("Stream Deck override points outside the key layout");
+      }
+      return `HIT ${key.label}!`;
+    }
+    case "uf8-bottom-out":
+      return "BOTTOM OUT!";
+    case "push-corners":
+      return "CORNERS!";
+  }
 }
 
 export function parseClientMessage(raw: string): ClientMessage | null {
@@ -259,7 +374,8 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
       return (
         typeof value.viewer.crewId === "string" &&
         isStation(value.viewer.station) &&
-        ("order" in value)
+        (value["directive"] === null ||
+          isPhoneDirective(value["directive"]))
       );
     case "console":
       return (
@@ -269,6 +385,58 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
     default:
       return false;
   }
+}
+
+function isPhoneDirective(value: unknown): value is PhoneDirective {
+  if (
+    !isRecord(value) ||
+    typeof value.kind !== "string" ||
+    typeof value["id"] !== "string" ||
+    typeof value["startedAt"] !== "number" ||
+    typeof value["deadlineAt"] !== "number"
+  ) {
+    return false;
+  }
+  switch (value.kind) {
+    case "order":
+      return isStation(value["target"]) && typeof value["prompt"] === "string";
+    case "local-override":
+      return isStation(value["station"]) && typeof value["prompt"] === "string";
+    case "reactor-manual":
+      return value["target"] === "uf8" && isReactorProfiles(value["profiles"]);
+    case "reactor-operator":
+      return value["station"] === "uf8" && typeof value["prompt"] === "string";
+    case "reactor-support":
+      return typeof value["prompt"] === "string";
+    default:
+      return false;
+  }
+}
+
+function isReactorProfiles(value: unknown): value is readonly ReactorProfile[] {
+  return (
+    Array.isArray(value) &&
+    value.length === REACTOR_PROFILES.length &&
+    value.every((profile) => {
+      if (
+        !isRecord(profile) ||
+        typeof profile["code"] !== "string" ||
+        !Array.isArray(profile["targets"]) ||
+        profile["targets"].length !== 2
+      ) {
+        return false;
+      }
+      return profile["targets"].every(
+        (target: unknown) =>
+          isRecord(target) &&
+          isIntegerInRange(target["channel"], 0, 7) &&
+          typeof target["label"] === "string" &&
+          isRecord(target["stop"]) &&
+          typeof target["stop"]["label"] === "string" &&
+          isNumberInRange(target["stop"]["value"], 0, 100),
+      );
+    })
+  );
 }
 
 function isUf8ConnectionState(
@@ -301,7 +469,12 @@ function isPhase(value: unknown): value is MissionPhaseView {
         typeof value.endsAt === "number" &&
         typeof value.score === "number" &&
         typeof value.integrity === "number" &&
-        typeof value.combo === "number"
+        typeof value.combo === "number" &&
+        isOneOf(value["activity"], [
+          "orders",
+          "local-overrides",
+          "reactor-procedure",
+        ])
       );
     case "game-over":
       return (
@@ -361,7 +534,7 @@ type JsonRecord = {
   phoneUrls?: unknown;
   streamDeckConnected?: unknown;
   pushBridgeConnected?: unknown;
-  order?: unknown;
+  directive?: unknown;
   mission?: unknown;
   crewId?: unknown;
   endsAt?: unknown;

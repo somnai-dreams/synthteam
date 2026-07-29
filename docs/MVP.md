@@ -29,8 +29,9 @@ Stream Deck and UF8 by default; the third adds Push.
 ### Stream Deck XL: routing and communications
 
 The 32 LCD keys form a dynamic switchboard. The first MVP task asks the operator
-to press a named source key followed by a named destination key. Later tasks can
-add holds, chords, and ordered sequences without changing the game protocol.
+to press a named source key followed by a named destination key. The first
+expanded Order adds a hold → tap → release sequence while preserving the same
+normalized key-down/key-up protocol.
 
 ### SSL UF8: reactor and propulsion
 
@@ -51,15 +52,21 @@ button command.
 
 - There is one phone/crew slot per active controller.
 - A mission starts with either two or three connected phones.
-- The active stations form a routing cycle, so every reader always receives an
-  order for another crew member's controller.
-- Every phone receives an order for a different controller.
-- Two or three orders run concurrently during a 90-second mission.
+- During Orders, the active stations form a routing cycle, so every reader
+  receives an instruction for another crew member's controller.
+- Opening Orders transition into a six-second Local Override. Every active
+  player receives an unmistakably self-directed microgame for their own device.
+- Pressure Orders transition into a shared Reactor Procedure. The UF8 operator
+  reports a controller-visible code while another player's phone supplies the
+  four-row calibration manual.
+- Final Orders run until the 90-second mission ends.
 - Completing an order scores points, raises the combo, and repairs a small
   amount of integrity.
 - A wrong discrete action costs a little integrity and resets that task's
   progress.
 - An expired order costs significant integrity and is immediately replaced.
+- Missed Local Overrides cost little integrity; a failed Reactor Procedure
+  costs more, but both return the mission to Orders instead of ending it.
 - The mission succeeds when time expires and fails when integrity reaches zero.
 
 ## MVP gate

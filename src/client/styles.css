@@ -577,6 +577,100 @@ small {
   text-align: center;
 }
 
+.phone-shell.mode-local-overrides {
+  --station: var(--green);
+  background-image: radial-gradient(
+    circle at 50% 42%,
+    rgba(130, 235, 146, 0.08),
+    transparent 48%
+  );
+}
+
+.phone-shell.mode-reactor-procedure {
+  --station: var(--danger);
+  background-image: radial-gradient(
+    circle at 50% 42%,
+    rgba(255, 94, 94, 0.09),
+    transparent 52%
+  );
+}
+
+.directive-local {
+  background: color-mix(in srgb, var(--green) 8%, var(--panel-raised));
+  box-shadow:
+    0 0 0 1px rgba(130, 235, 146, 0.42),
+    0 24px 60px rgba(0, 0, 0, 0.38),
+    0 0 44px rgba(130, 235, 146, 0.08);
+}
+
+.directive-local h2 {
+  display: grid;
+  min-height: 2.35em;
+  place-content: center;
+  color: var(--green);
+  font-size: clamp(3rem, 16vw, 7.5rem);
+  text-align: center;
+}
+
+.phone-instruction.is-local {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.directive-procedure {
+  background: color-mix(in srgb, var(--danger) 7%, var(--panel-raised));
+  box-shadow:
+    0 0 0 1px rgba(255, 94, 94, 0.38),
+    0 24px 60px rgba(0, 0, 0, 0.38);
+}
+
+.directive-procedure h2 {
+  min-height: auto;
+  margin-top: 20px;
+  color: #ffb0a8;
+  font-size: clamp(2rem, 9vw, 4rem);
+}
+
+.procedure-table {
+  display: grid;
+  gap: 1px;
+  margin-top: 20px;
+  overflow: hidden;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.procedure-table > div {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  background: #101519;
+  font-family: ui-monospace, monospace;
+}
+
+.procedure-table strong {
+  color: #ff8d84;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+}
+
+.procedure-table span {
+  color: #d9dddd;
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.operator-procedure h2,
+.support-procedure h2 {
+  display: grid;
+  min-height: 3.2em;
+  place-content: center;
+  text-align: center;
+}
+
 .crew-strip {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -736,6 +830,47 @@ small {
   max-width: 680px;
 }
 
+.activity-banner {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+
+.activity-banner span {
+  color: var(--muted);
+  font-size: 0.62rem;
+}
+
+.activity-banner strong {
+  color: var(--cyan);
+  font-size: 0.72rem;
+}
+
+.activity-banner.mode-local-overrides {
+  box-shadow: 0 0 0 1px rgba(130, 235, 146, 0.34);
+}
+
+.activity-banner.mode-local-overrides strong {
+  color: var(--green);
+}
+
+.activity-banner.mode-reactor-procedure {
+  box-shadow: 0 0 0 1px rgba(255, 94, 94, 0.34);
+}
+
+.activity-banner.mode-reactor-procedure strong {
+  color: #ff8d84;
+}
+
 .task-overview {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -755,6 +890,28 @@ small {
   box-shadow:
     var(--shadow),
     inset 3px 0 var(--station);
+}
+
+.task-card.is-complete {
+  opacity: 0.55;
+  box-shadow:
+    var(--shadow),
+    inset 3px 0 var(--green);
+}
+
+.procedure-overview {
+  max-width: 680px;
+  margin-top: 10px;
+}
+
+.procedure-card {
+  min-height: 138px;
+}
+
+.procedure-card p {
+  color: #ff8d84;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.08em;
 }
 
 .task-route {
@@ -869,6 +1026,21 @@ small {
 .deck-key.is-armed {
   background: color-mix(in srgb, currentColor 14%, #151c20);
   color: var(--cyan);
+}
+
+.deck-key.is-called {
+  color: var(--amber);
+  box-shadow:
+    0 0 0 1px currentColor,
+    0 0 12px rgba(255, 179, 64, 0.3);
+}
+
+.deck-key.is-override-target {
+  background: rgba(130, 235, 146, 0.2);
+  color: var(--green);
+  box-shadow:
+    0 0 0 2px var(--green),
+    0 0 18px rgba(130, 235, 146, 0.46);
 }
 
 .deck-key:active {

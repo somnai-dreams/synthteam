@@ -53,6 +53,50 @@ export const UF8_FADER_STOPS = [
 
 export type Uf8FaderStop = (typeof UF8_FADER_STOPS)[number];
 
+export type Uf8FaderValues = [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
+export const REACTOR_PROFILES = [
+  {
+    code: "ALPHA",
+    targets: [
+      { channel: 4, label: "COOLANT", stop: UF8_FADER_STOPS[5] },
+      { channel: 3, label: "DRIFT", stop: UF8_FADER_STOPS[7] },
+    ],
+  },
+  {
+    code: "BETA",
+    targets: [
+      { channel: 4, label: "COOLANT", stop: UF8_FADER_STOPS[4] },
+      { channel: 3, label: "DRIFT", stop: UF8_FADER_STOPS[6] },
+    ],
+  },
+  {
+    code: "GAMMA",
+    targets: [
+      { channel: 4, label: "COOLANT", stop: UF8_FADER_STOPS[6] },
+      { channel: 3, label: "DRIFT", stop: UF8_FADER_STOPS[3] },
+    ],
+  },
+  {
+    code: "DELTA",
+    targets: [
+      { channel: 4, label: "COOLANT", stop: UF8_FADER_STOPS[7] },
+      { channel: 3, label: "DRIFT", stop: UF8_ZERO_FADER_STOP },
+    ],
+  },
+] as const;
+
+export type ReactorProfile = (typeof REACTOR_PROFILES)[number];
+
 export type StreamDeckKeyColor = "cyan" | "amber" | "magenta" | "green";
 
 export type StreamDeckKey = {
@@ -80,6 +124,13 @@ export type StreamDeckRouteTask = TaskBase & {
   sourceKeyIndex: number;
   targetKeyIndex: number;
   progress: 0 | 1;
+};
+
+export type StreamDeckSequenceTask = TaskBase & {
+  kind: "streamdeck-sequence";
+  holdKeyIndex: number;
+  tapKeyIndex: number;
+  progress: 0 | 1 | 2;
 };
 
 export type Uf8FaderTask = TaskBase & {
@@ -110,9 +161,80 @@ export type ActivePushTask = PushPathTask | PushDefendTask;
 
 export type ActiveTask =
   | StreamDeckRouteTask
+  | StreamDeckSequenceTask
   | Uf8FaderTask
   | PushPathTask
   | PushDefendTask;
+
+export type OrdersBeat = "opening" | "pressure" | "final";
+
+export type OrdersActivity = {
+  kind: "orders";
+  beat: OrdersBeat;
+  startedAt: number;
+  endsAt: number;
+  tasks: ActiveTask[];
+};
+
+type LocalOverrideBase = {
+  id: string;
+  startedAt: number;
+  deadlineAt: number;
+  completed: boolean;
+};
+
+export type StreamDeckHitOverride = LocalOverrideBase & {
+  kind: "streamdeck-hit";
+  station: "streamdeck";
+  keyIndex: number;
+};
+
+export type Uf8BottomOutOverride = LocalOverrideBase & {
+  kind: "uf8-bottom-out";
+  station: "uf8";
+  threshold: number;
+};
+
+export type PushCornersOverride = LocalOverrideBase & {
+  kind: "push-corners";
+  station: "push";
+  pressed: GridPoint[];
+};
+
+export type LocalOverrideTask =
+  | StreamDeckHitOverride
+  | Uf8BottomOutOverride
+  | PushCornersOverride;
+
+export type LocalOverridesActivity = {
+  kind: "local-overrides";
+  startedAt: number;
+  endsAt: number;
+  tasks: LocalOverrideTask[];
+};
+
+export type ReactorProcedure = {
+  id: string;
+  reader: Station;
+  createdAt: number;
+  deadlineAt: number;
+  profile: ReactorProfile;
+  tolerance: number;
+  holdMs: number;
+  withinSince: number | null;
+};
+
+export type ReactorProcedureActivity = {
+  kind: "reactor-procedure";
+  startedAt: number;
+  endsAt: number;
+  procedure: ReactorProcedure;
+};
+
+export type MissionActivity =
+  | OrdersActivity
+  | LocalOverridesActivity
+  | ReactorProcedureActivity;
 
 export type StreamDeckHardwareEvent = {
   kind: "streamdeck-key";
@@ -150,8 +272,9 @@ export type MissionState = {
   score: number;
   integrity: number;
   combo: number;
-  tasks: ActiveTask[];
   streamDeckKeys: readonly StreamDeckKey[];
+  uf8Faders: Uf8FaderValues;
+  activity: MissionActivity;
 };
 
 export type MissionOutcome =
@@ -175,6 +298,30 @@ export type MissionOutcome =
       target: Station;
     }
   | {
+      kind: "activity-started";
+      activity: MissionActivity["kind"];
+    }
+  | {
+      kind: "local-override-completed";
+      taskId: string;
+      station: Station;
+      points: number;
+    }
+  | {
+      kind: "local-override-expired";
+      taskId: string;
+      station: Station;
+    }
+  | {
+      kind: "procedure-completed";
+      procedureId: string;
+      points: number;
+    }
+  | {
+      kind: "procedure-expired";
+      procedureId: string;
+    }
+  | {
       kind: "mission-ended";
       reason: "survived" | "integrity";
     };
@@ -186,6 +333,7 @@ export type MissionUpdate = {
 export function stationForTask(task: ActiveTask): Station {
   switch (task.kind) {
     case "streamdeck-route":
+    case "streamdeck-sequence":
       return "streamdeck";
     case "uf8-fader":
       return "uf8";
@@ -196,10 +344,10 @@ export function stationForTask(task: ActiveTask): Station {
 }
 
 export function taskForReader(
-  mission: MissionState,
+  activity: OrdersActivity,
   reader: Station,
 ): ActiveTask {
-  const task = mission.tasks.find((candidate) => candidate.reader === reader);
+  const task = activity.tasks.find((candidate) => candidate.reader === reader);
   if (task === undefined) {
     throw new Error(`Missing active task for ${reader}`);
   }
@@ -218,6 +366,14 @@ export function describeTask(
         throw new Error("Stream Deck task points outside the active key layout");
       }
       return `ROUTE ${source.label} THROUGH ${target.label}`;
+    }
+    case "streamdeck-sequence": {
+      const hold = keys[task.holdKeyIndex];
+      const tap = keys[task.tapKeyIndex];
+      if (hold === undefined || tap === undefined) {
+        throw new Error("Stream Deck sequence points outside the active key layout");
+      }
+      return `HOLD ${hold.label}, TAP ${tap.label}, RELEASE ${hold.label}`;
     }
     case "uf8-fader":
       return `SET ${task.label} TO ${task.target.label}`;

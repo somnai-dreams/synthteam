@@ -1,6 +1,7 @@
 import type {
-  ActiveTask,
   HardwareEvent,
+  MissionActivity,
+  PushCornersOverride,
   PushPathTask,
 } from "../shared/domain.ts";
 
@@ -31,6 +32,10 @@ type PushLearnState = {
 };
 
 type LearnState = PushLearnState | null;
+
+type PushLightCue =
+  | { kind: "path"; task: PushPathTask }
+  | { kind: "corners"; task: PushCornersOverride };
 
 export type MidiBridgeView = {
   status: MidiStatus;
@@ -143,35 +148,64 @@ export class MidiBridge {
     this.#onChange();
   }
 
-  syncMission(tasks: readonly ActiveTask[]): void {
-    const task = tasks.find(
-      (candidate): candidate is PushPathTask =>
-        candidate.kind === "push-path",
-    );
+  syncActivity(activity: MissionActivity | null): void {
+    const cue = pushLightCue(activity);
     const grid = this.#configuration.pushGrid;
     const output = this.#pushOutput();
-    if (task === undefined || grid === null || output === null) {
+    if (cue === null || grid === null || output === null) {
       this.#clearPushLights();
       this.#lastPushSignature = "";
       return;
     }
-    const signature = `${task.id}:${task.progress}:${output.id}`;
+    const signature =
+      cue.kind === "path"
+        ? `${cue.task.id}:path:${cue.task.progress}:${output.id}`
+        : `${cue.task.id}:corners:${cue.task.pressed.length}:${output.id}`;
     if (signature === this.#lastPushSignature) {
       return;
     }
     this.#clearPushLights();
     const notes: number[] = [];
-    for (let index = 0; index < task.path.length; index += 1) {
-      const point = task.path[index];
-      if (point === undefined) {
-        throw new Error("Push path contains a missing point");
-      }
-      const note =
-        grid.bottomLeftNote + point.x * grid.xStep + point.y * grid.yStep;
-      const velocity =
-        index < task.progress ? 2 : index === task.progress ? 127 : 18;
-      output.send([0x90 | grid.midiChannel, note, velocity]);
-      notes.push(note);
+    switch (cue.kind) {
+      case "path":
+        for (let index = 0; index < cue.task.path.length; index += 1) {
+          const point = cue.task.path[index];
+          if (point === undefined) {
+            throw new Error("Push path contains a missing point");
+          }
+          const note =
+            grid.bottomLeftNote + point.x * grid.xStep + point.y * grid.yStep;
+          const velocity =
+            index < cue.task.progress
+              ? 2
+              : index === cue.task.progress
+                ? 127
+                : 18;
+          output.send([0x90 | grid.midiChannel, note, velocity]);
+          notes.push(note);
+        }
+        break;
+      case "corners":
+        for (const point of [
+          { x: 0, y: 0 },
+          { x: 7, y: 0 },
+          { x: 0, y: 7 },
+          { x: 7, y: 7 },
+        ]) {
+          const note =
+            grid.bottomLeftNote + point.x * grid.xStep + point.y * grid.yStep;
+          const pressed = cue.task.pressed.some(
+            (candidate) =>
+              candidate.x === point.x && candidate.y === point.y,
+          );
+          output.send([
+            0x90 | grid.midiChannel,
+            note,
+            pressed ? 2 : 127,
+          ]);
+          notes.push(note);
+        }
+        break;
     }
     this.#litPushNotes = notes;
     this.#lastPushSignature = signature;
@@ -351,6 +385,30 @@ export class MidiBridge {
       STORAGE_KEY,
       JSON.stringify(this.#configuration),
     );
+  }
+}
+
+function pushLightCue(activity: MissionActivity | null): PushLightCue | null {
+  if (activity === null) {
+    return null;
+  }
+  switch (activity.kind) {
+    case "orders": {
+      const task = activity.tasks.find(
+        (candidate): candidate is PushPathTask =>
+          candidate.kind === "push-path",
+      );
+      return task === undefined ? null : { kind: "path", task };
+    }
+    case "local-overrides": {
+      const task = activity.tasks.find(
+        (candidate): candidate is PushCornersOverride =>
+          candidate.kind === "push-corners",
+      );
+      return task === undefined ? null : { kind: "corners", task };
+    }
+    case "reactor-procedure":
+      return null;
   }
 }
 

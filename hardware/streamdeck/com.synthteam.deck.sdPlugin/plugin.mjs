@@ -100,19 +100,48 @@ function renderAll() {
 
 function renderContext(context, index) {
   const key = gameState.keys.find((candidate) => candidate.index === index);
-  const isLockedSource =
-    gameState.task !== null &&
-    gameState.task.progress === 1 &&
-    gameState.task.sourceKeyIndex === index;
+  const displayState = keyDisplayState(gameState.task, index);
   const label = key?.label ?? "STANDBY";
-  const color = isLockedSource ? "#82eb92" : colorValue(key?.color);
-  const background = key === undefined ? "#0b0f12" : "#10161a";
-  const image = svgDataUrl(label, color, background, isLockedSource);
+  const color =
+    displayState === "armed" || displayState === "override"
+      ? "#82eb92"
+      : colorValue(key?.color);
+  const background =
+    displayState === "override"
+      ? "#173723"
+      : key === undefined
+        ? "#0b0f12"
+        : "#10161a";
+  const image = svgDataUrl(
+    label,
+    color,
+    background,
+    displayState !== "idle",
+  );
   sendSdk({
     context,
     event: "setImage",
     payload: { image },
   });
+}
+
+function keyDisplayState(task, index) {
+  if (task === null) return "idle";
+  switch (task.kind) {
+    case "streamdeck-route":
+      return task.progress === 1 && task.sourceKeyIndex === index
+        ? "armed"
+        : "idle";
+    case "streamdeck-sequence":
+      if (task.holdKeyIndex === index && task.progress > 0) return "armed";
+      return task.tapKeyIndex === index && task.progress === 1
+        ? "called"
+        : "idle";
+    case "streamdeck-hit":
+      return task.keyIndex === index ? "override" : "idle";
+    default:
+      return "idle";
+  }
 }
 
 function svgDataUrl(label, color, background, active) {
@@ -178,7 +207,9 @@ function isGameState(value) {
     (value.task === null ||
       (typeof value.task === "object" &&
         value.task !== null &&
-        value.task.kind === "streamdeck-route"))
+        (value.task.kind === "streamdeck-route" ||
+          value.task.kind === "streamdeck-sequence" ||
+          value.task.kind === "streamdeck-hit")))
   );
 }
 

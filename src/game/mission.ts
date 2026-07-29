@@ -2,16 +2,23 @@ import type {
   ActiveTask,
   GridPoint,
   HardwareEvent,
+  LocalOverrideTask,
+  LocalOverridesActivity,
   MissionOutcome,
   MissionState,
   MissionStations,
   MissionUpdate,
+  OrdersActivity,
+  OrdersBeat,
   PushPathColor,
+  ReactorProcedureActivity,
   Station,
   StreamDeckKey,
   StreamDeckKeyColor,
+  Uf8FaderValues,
 } from "../shared/domain.ts";
 import {
+  REACTOR_PROFILES,
   STATIONS,
   stationForTask,
   UF8_CONTROL_LABELS,
@@ -19,11 +26,21 @@ import {
 } from "../shared/domain.ts";
 
 const MISSION_DURATION_MS = 90_000;
+const ORDER_BLOCK_DURATION_MS = 18_000;
+const LOCAL_OVERRIDE_DURATION_MS = 6_000;
+const REACTOR_PROCEDURE_DURATION_MS = 20_000;
 const TASK_DURATION_MS = 13_000;
 const WRONG_ACTION_DAMAGE = 3;
 const EXPIRED_TASK_DAMAGE = 12;
+const LOCAL_OVERRIDE_DAMAGE = 3;
+const REACTOR_PROCEDURE_DAMAGE = 18;
 const COMPLETION_REPAIR = 2;
+const REACTOR_PROCEDURE_REPAIR = 8;
+const LOCAL_OVERRIDE_POINTS = 50;
+const REACTOR_PROCEDURE_POINTS = 500;
 const UF8_HOLD_MS = 450;
+const REACTOR_HOLD_MS = 650;
+const UF8_BOTTOM_THRESHOLD = 5;
 
 // Push defend activity: chance of rolling it instead of a path task,
 // and how its missile parameters scale as the mission progresses
@@ -84,6 +101,15 @@ const PUSH_COLORS: readonly PushPathColor[] = [
   "lime",
 ];
 
+const PUSH_CORNERS: readonly GridPoint[] = [
+  { x: 0, y: 0 },
+  { x: 7, y: 0 },
+  { x: 0, y: 7 },
+  { x: 7, y: 7 },
+];
+
+const DEFAULT_UF8_FADERS: Uf8FaderValues = [0, 0, 0, 0, 0, 0, 0, 0];
+
 export type MissionDependencies = {
   random: () => number;
   makeId: () => string;
@@ -96,30 +122,27 @@ export function createMission(
     random: Math.random,
     makeId: () => crypto.randomUUID(),
   },
+  initialUf8Faders: Uf8FaderValues = DEFAULT_UF8_FADERS,
 ): MissionState {
   assertUniqueStations(stations);
-  const streamDeckKeys = createStreamDeckLayout();
-  const mission: MissionState = {
+  const endsAt = now + MISSION_DURATION_MS;
+  return {
     startedAt: now,
-    endsAt: now + MISSION_DURATION_MS,
+    endsAt,
     stations,
     score: 0,
     integrity: 100,
     combo: 0,
-    tasks: [],
-    streamDeckKeys,
+    streamDeckKeys: createStreamDeckLayout(),
+    uf8Faders: copyUf8Faders(initialUf8Faders),
+    activity: createOrdersActivity(
+      stations,
+      "opening",
+      now,
+      now + ORDER_BLOCK_DURATION_MS,
+      dependencies,
+    ),
   };
-
-  for (let index = 0; index < stations.length; index += 1) {
-    const reader = stations[index];
-    const target = stations[(index + 1) % stations.length];
-    if (reader === undefined || target === undefined) {
-      throw new Error("Mission route is missing a station");
-    }
-    mission.tasks.push(createTaskForRoute(reader, target, now, dependencies));
-  }
-
-  return mission;
 }
 
 export function applyHardwareEvent(
@@ -131,47 +154,32 @@ export function applyHardwareEvent(
     makeId: () => crypto.randomUUID(),
   },
 ): MissionUpdate {
-  if (mission.integrity <= 0 || now >= mission.endsAt) {
+  if (
+    mission.integrity <= 0 ||
+    now >= mission.endsAt ||
+    !mission.stations.some((station) => station === stationForEvent(event))
+  ) {
     return { outcomes: [] };
   }
 
-  const taskIndex = mission.tasks.findIndex(
-    (task) => stationForTask(task) === stationForEvent(event),
-  );
-  const task = mission.tasks[taskIndex];
-  if (task === undefined) {
-    return { outcomes: [] };
+  if (event.kind === "uf8-fader") {
+    mission.uf8Faders[event.channel] = event.value;
   }
 
-  // The defend activity simulates on the bridge; a failure report ends
-  // the task exactly like an expired order.
-  if (event.kind === "push-defend-failed") {
-    if (task.kind !== "push-defend") {
+  switch (mission.activity.kind) {
+    case "orders":
+      return applyOrderEvent(mission, mission.activity, event, now, dependencies);
+    case "local-overrides":
+      return applyLocalOverrideEvent(
+        mission,
+        mission.activity,
+        event,
+        now,
+        dependencies,
+      );
+    case "reactor-procedure":
+      updateReactorHold(mission, mission.activity, event, now);
       return { outcomes: [] };
-    }
-    return { outcomes: [expireTaskAt(mission, taskIndex, now, dependencies)] };
-  }
-
-  const result = applyEventToTask(task, event, now);
-  switch (result) {
-    case "ignored":
-    case "progress":
-      return { outcomes: [] };
-    case "mistake":
-      mission.integrity = Math.max(0, mission.integrity - WRONG_ACTION_DAMAGE);
-      mission.combo = 0;
-      return {
-        outcomes: [
-          {
-            kind: "mistake",
-            taskId: task.id,
-            reader: task.reader,
-            target: stationForTask(task),
-          },
-        ],
-      };
-    case "completed":
-      return completeTaskAt(mission, taskIndex, now, dependencies);
   }
 }
 
@@ -194,35 +202,27 @@ export function advanceMission(
     };
   }
 
-  const outcomes: MissionOutcome[] = [];
-  for (let index = 0; index < mission.tasks.length; index += 1) {
-    const task = mission.tasks[index];
-    if (task === undefined) {
-      throw new Error("Mission task array changed during tick");
-    }
-
-    if (
-      task.kind === "uf8-fader" &&
-      task.withinSince !== null &&
-      now - task.withinSince >= task.holdMs
-    ) {
-      outcomes.push(
-        ...completeTaskAt(mission, index, now, dependencies).outcomes,
+  let outcomes: MissionOutcome[];
+  switch (mission.activity.kind) {
+    case "orders":
+      outcomes = advanceOrders(mission, mission.activity, now, dependencies);
+      break;
+    case "local-overrides":
+      outcomes = advanceLocalOverrides(
+        mission,
+        mission.activity,
+        now,
+        dependencies,
       );
-      continue;
-    }
-
-    if (now >= task.deadlineAt) {
-      // Surviving a defend activity's clock is the win condition;
-      // every other task expiring is a failure.
-      if (task.kind === "push-defend") {
-        outcomes.push(
-          ...completeTaskAt(mission, index, now, dependencies).outcomes,
-        );
-      } else {
-        outcomes.push(expireTaskAt(mission, index, now, dependencies));
-      }
-    }
+      break;
+    case "reactor-procedure":
+      outcomes = advanceReactorProcedure(
+        mission,
+        mission.activity,
+        now,
+        dependencies,
+      );
+      break;
   }
 
   if (mission.integrity <= 0) {
@@ -239,6 +239,112 @@ function createStreamDeckLayout(): readonly StreamDeckKey[] {
   }));
 }
 
+function createOrdersActivity(
+  stations: MissionStations,
+  beat: OrdersBeat,
+  now: number,
+  endsAt: number,
+  dependencies: MissionDependencies,
+): OrdersActivity {
+  const tasks: ActiveTask[] = [];
+  for (let index = 0; index < stations.length; index += 1) {
+    const reader = stations[index];
+    const target = stations[(index + 1) % stations.length];
+    if (reader === undefined || target === undefined) {
+      throw new Error("Mission route is missing a station");
+    }
+    tasks.push(createTaskForRoute(reader, target, now, dependencies));
+  }
+  return { kind: "orders", beat, startedAt: now, endsAt, tasks };
+}
+
+function createLocalOverridesActivity(
+  mission: MissionState,
+  now: number,
+  dependencies: MissionDependencies,
+): LocalOverridesActivity {
+  const deadlineAt = now + LOCAL_OVERRIDE_DURATION_MS;
+  const tasks: LocalOverrideTask[] = [];
+  for (const station of mission.stations) {
+    switch (station) {
+      case "streamdeck":
+        tasks.push({
+          kind: "streamdeck-hit",
+          station,
+          id: dependencies.makeId(),
+          startedAt: now,
+          deadlineAt,
+          completed: false,
+          keyIndex: randomInteger(dependencies.random, 0, 31),
+        });
+        break;
+      case "uf8":
+        tasks.push({
+          kind: "uf8-bottom-out",
+          station,
+          id: dependencies.makeId(),
+          startedAt: now,
+          deadlineAt,
+          completed: false,
+          threshold: UF8_BOTTOM_THRESHOLD,
+        });
+        break;
+      case "push":
+        tasks.push({
+          kind: "push-corners",
+          station,
+          id: dependencies.makeId(),
+          startedAt: now,
+          deadlineAt,
+          completed: false,
+          pressed: [],
+        });
+        break;
+    }
+  }
+  return {
+    kind: "local-overrides",
+    startedAt: now,
+    endsAt: deadlineAt,
+    tasks,
+  };
+}
+
+function createReactorProcedureActivity(
+  mission: MissionState,
+  now: number,
+  dependencies: MissionDependencies,
+): ReactorProcedureActivity {
+  const profile =
+    REACTOR_PROFILES[
+      randomInteger(dependencies.random, 0, REACTOR_PROFILES.length - 1)
+    ];
+  if (profile === undefined) {
+    throw new Error("Reactor procedure has no calibration profile");
+  }
+  const deadlineAt = now + REACTOR_PROCEDURE_DURATION_MS;
+  const reader = readerForTarget(mission.stations, "uf8");
+  const activity: ReactorProcedureActivity = {
+    kind: "reactor-procedure",
+    startedAt: now,
+    endsAt: deadlineAt,
+    procedure: {
+      id: dependencies.makeId(),
+      reader,
+      createdAt: now,
+      deadlineAt,
+      profile,
+      tolerance: 3,
+      holdMs: REACTOR_HOLD_MS,
+      withinSince: null,
+    },
+  };
+  if (reactorTargetsAreSet(mission, activity)) {
+    activity.procedure.withinSince = now;
+  }
+  return activity;
+}
+
 function createTaskForRoute(
   reader: Station,
   target: Station,
@@ -248,7 +354,9 @@ function createTaskForRoute(
 ): ActiveTask {
   switch (target) {
     case "streamdeck":
-      return createStreamDeckTask(reader, now, dependencies);
+      return dependencies.random() < 0.5
+        ? createStreamDeckSequenceTask(reader, now, dependencies)
+        : createStreamDeckRouteTask(reader, now, dependencies);
     case "uf8":
       return createUf8Task(reader, now, dependencies);
     case "push":
@@ -261,7 +369,7 @@ function missionDifficulty(mission: MissionState, now: number): number {
   return Math.min(1, Math.max(0, elapsed));
 }
 
-function createStreamDeckTask(
+function createStreamDeckRouteTask(
   reader: Station,
   now: number,
   dependencies: MissionDependencies,
@@ -276,6 +384,25 @@ function createStreamDeckTask(
     deadlineAt: now + TASK_DURATION_MS,
     sourceKeyIndex,
     targetKeyIndex: (sourceKeyIndex + offset) % 32,
+    progress: 0,
+  };
+}
+
+function createStreamDeckSequenceTask(
+  reader: Station,
+  now: number,
+  dependencies: MissionDependencies,
+): ActiveTask {
+  const holdKeyIndex = randomInteger(dependencies.random, 0, 31);
+  const offset = randomInteger(dependencies.random, 1, 31);
+  return {
+    kind: "streamdeck-sequence",
+    id: dependencies.makeId(),
+    reader,
+    createdAt: now,
+    deadlineAt: now + TASK_DURATION_MS,
+    holdKeyIndex,
+    tapKeyIndex: (holdKeyIndex + offset) % 32,
     progress: 0,
   };
 }
@@ -398,6 +525,55 @@ function createPushPath(random: () => number): readonly GridPoint[] {
 
 type TaskEventResult = "ignored" | "progress" | "mistake" | "completed";
 
+function applyOrderEvent(
+  mission: MissionState,
+  activity: OrdersActivity,
+  event: HardwareEvent,
+  now: number,
+  dependencies: MissionDependencies,
+): MissionUpdate {
+  const taskIndex = activity.tasks.findIndex(
+    (task) => stationForTask(task) === stationForEvent(event),
+  );
+  const task = activity.tasks[taskIndex];
+  if (task === undefined) {
+    return { outcomes: [] };
+  }
+
+  if (event.kind === "push-defend-failed") {
+    if (task.kind !== "push-defend") {
+      return { outcomes: [] };
+    }
+    return {
+      outcomes: [
+        expireTaskAt(mission, activity, taskIndex, now, dependencies),
+      ],
+    };
+  }
+
+  const result = applyEventToTask(task, event, now);
+  switch (result) {
+    case "ignored":
+    case "progress":
+      return { outcomes: [] };
+    case "mistake":
+      mission.integrity = Math.max(0, mission.integrity - WRONG_ACTION_DAMAGE);
+      mission.combo = 0;
+      return {
+        outcomes: [
+          {
+            kind: "mistake",
+            taskId: task.id,
+            reader: task.reader,
+            target: stationForTask(task),
+          },
+        ],
+      };
+    case "completed":
+      return completeTaskAt(mission, activity, taskIndex, now, dependencies);
+  }
+}
+
 function applyEventToTask(
   task: ActiveTask,
   event: HardwareEvent,
@@ -417,6 +593,44 @@ function applyEventToTask(
       }
       task.progress = 0;
       return "mistake";
+
+    case "streamdeck-sequence":
+      if (event.kind !== "streamdeck-key") {
+        return "ignored";
+      }
+      switch (task.progress) {
+        case 0:
+          if (event.phase === "up") {
+            return "ignored";
+          }
+          if (event.keyIndex === task.holdKeyIndex) {
+            task.progress = 1;
+            return "progress";
+          }
+          return "mistake";
+        case 1:
+          if (
+            event.phase === "down" &&
+            event.keyIndex === task.tapKeyIndex
+          ) {
+            task.progress = 2;
+            return "progress";
+          }
+          if (event.phase === "up" && event.keyIndex !== task.holdKeyIndex) {
+            return "ignored";
+          }
+          task.progress = 0;
+          return "mistake";
+        case 2:
+          if (event.phase === "up" && event.keyIndex === task.holdKeyIndex) {
+            return "completed";
+          }
+          if (event.phase === "up" && event.keyIndex === task.tapKeyIndex) {
+            return "ignored";
+          }
+          task.progress = 0;
+          return "mistake";
+      }
 
     case "uf8-fader":
       if (event.kind !== "uf8-fader" || event.channel !== task.channel) {
@@ -453,25 +667,275 @@ function applyEventToTask(
   }
 }
 
-function stationForEvent(event: HardwareEvent): Station {
-  switch (event.kind) {
-    case "streamdeck-key":
-      return "streamdeck";
-    case "uf8-fader":
-      return "uf8";
-    case "push-pad":
-    case "push-defend-failed":
-      return "push";
+function applyLocalOverrideEvent(
+  mission: MissionState,
+  activity: LocalOverridesActivity,
+  event: HardwareEvent,
+  now: number,
+  dependencies: MissionDependencies,
+): MissionUpdate {
+  const station = stationForEvent(event);
+  const task = activity.tasks.find(
+    (candidate) => candidate.station === station,
+  );
+  if (task === undefined || task.completed) {
+    return { outcomes: [] };
   }
+
+  switch (task.kind) {
+    case "streamdeck-hit":
+      task.completed =
+        event.kind === "streamdeck-key" &&
+        event.phase === "down" &&
+        event.keyIndex === task.keyIndex;
+      break;
+    case "uf8-bottom-out":
+      task.completed =
+        event.kind === "uf8-fader" &&
+        mission.uf8Faders.every((value) => value <= task.threshold);
+      break;
+    case "push-corners":
+      if (
+        event.kind === "push-pad" &&
+        event.phase === "down" &&
+        isPushCorner(event.point) &&
+        !task.pressed.some((point) => samePoint(point, event.point))
+      ) {
+        task.pressed.push(event.point);
+      }
+      task.completed = task.pressed.length === PUSH_CORNERS.length;
+      break;
+  }
+
+  if (!task.completed) {
+    return { outcomes: [] };
+  }
+  mission.score += LOCAL_OVERRIDE_POINTS;
+  const outcomes: MissionOutcome[] = [
+    {
+      kind: "local-override-completed",
+      taskId: task.id,
+      station,
+      points: LOCAL_OVERRIDE_POINTS,
+    },
+  ];
+  if (activity.tasks.every((candidate) => candidate.completed)) {
+    mission.activity = createOrdersActivity(
+      mission.stations,
+      "pressure",
+      now,
+      now + ORDER_BLOCK_DURATION_MS,
+      dependencies,
+    );
+    mission.combo = 0;
+    outcomes.push({ kind: "activity-started", activity: "orders" });
+  }
+  return { outcomes };
+}
+
+function updateReactorHold(
+  mission: MissionState,
+  activity: ReactorProcedureActivity,
+  event: HardwareEvent,
+  now: number,
+): void {
+  if (event.kind !== "uf8-fader") {
+    return;
+  }
+  if (reactorTargetsAreSet(mission, activity)) {
+    activity.procedure.withinSince ??= now;
+  } else {
+    activity.procedure.withinSince = null;
+  }
+}
+
+function advanceOrders(
+  mission: MissionState,
+  activity: OrdersActivity,
+  now: number,
+  dependencies: MissionDependencies,
+): MissionOutcome[] {
+  if (now >= activity.endsAt) {
+    switch (activity.beat) {
+      case "opening":
+        mission.activity = createLocalOverridesActivity(
+          mission,
+          now,
+          dependencies,
+        );
+        mission.combo = 0;
+        return [
+          { kind: "activity-started", activity: "local-overrides" },
+        ];
+      case "pressure":
+        if (mission.stations.some((station) => station === "uf8")) {
+          mission.activity = createReactorProcedureActivity(
+            mission,
+            now,
+            dependencies,
+          );
+          mission.combo = 0;
+          return [
+            { kind: "activity-started", activity: "reactor-procedure" },
+          ];
+        }
+        mission.activity = createOrdersActivity(
+          mission.stations,
+          "final",
+          now,
+          mission.endsAt,
+          dependencies,
+        );
+        return [{ kind: "activity-started", activity: "orders" }];
+      case "final":
+        return [];
+    }
+  }
+
+  const outcomes: MissionOutcome[] = [];
+  for (let index = 0; index < activity.tasks.length; index += 1) {
+    const task = activity.tasks[index];
+    if (task === undefined) {
+      throw new Error("Mission task array changed during tick");
+    }
+
+    if (
+      task.kind === "uf8-fader" &&
+      task.withinSince !== null &&
+      now - task.withinSince >= task.holdMs
+    ) {
+      outcomes.push(
+        ...completeTaskAt(
+          mission,
+          activity,
+          index,
+          now,
+          dependencies,
+        ).outcomes,
+      );
+      continue;
+    }
+
+    if (now >= task.deadlineAt) {
+      if (task.kind === "push-defend") {
+        outcomes.push(
+          ...completeTaskAt(
+            mission,
+            activity,
+            index,
+            now,
+            dependencies,
+          ).outcomes,
+        );
+      } else {
+        outcomes.push(
+          expireTaskAt(mission, activity, index, now, dependencies),
+        );
+      }
+    }
+  }
+  return outcomes;
+}
+
+function advanceLocalOverrides(
+  mission: MissionState,
+  activity: LocalOverridesActivity,
+  now: number,
+  dependencies: MissionDependencies,
+): MissionOutcome[] {
+  if (now < activity.endsAt) {
+    return [];
+  }
+  const outcomes: MissionOutcome[] = [];
+  for (const task of activity.tasks) {
+    if (task.completed) {
+      continue;
+    }
+    mission.integrity = Math.max(
+      0,
+      mission.integrity - LOCAL_OVERRIDE_DAMAGE,
+    );
+    outcomes.push({
+      kind: "local-override-expired",
+      taskId: task.id,
+      station: task.station,
+    });
+  }
+  mission.activity = createOrdersActivity(
+    mission.stations,
+    "pressure",
+    now,
+    now + ORDER_BLOCK_DURATION_MS,
+    dependencies,
+  );
+  mission.combo = 0;
+  outcomes.push({ kind: "activity-started", activity: "orders" });
+  return outcomes;
+}
+
+function advanceReactorProcedure(
+  mission: MissionState,
+  activity: ReactorProcedureActivity,
+  now: number,
+  dependencies: MissionDependencies,
+): MissionOutcome[] {
+  const withinSince = activity.procedure.withinSince;
+  if (
+    withinSince !== null &&
+    now - withinSince >= activity.procedure.holdMs
+  ) {
+    mission.score += REACTOR_PROCEDURE_POINTS;
+    mission.integrity = Math.min(
+      100,
+      mission.integrity + REACTOR_PROCEDURE_REPAIR,
+    );
+    mission.activity = createOrdersActivity(
+      mission.stations,
+      "final",
+      now,
+      mission.endsAt,
+      dependencies,
+    );
+    return [
+      {
+        kind: "procedure-completed",
+        procedureId: activity.procedure.id,
+        points: REACTOR_PROCEDURE_POINTS,
+      },
+      { kind: "activity-started", activity: "orders" },
+    ];
+  }
+  if (now < activity.endsAt) {
+    return [];
+  }
+  mission.integrity = Math.max(
+    0,
+    mission.integrity - REACTOR_PROCEDURE_DAMAGE,
+  );
+  mission.activity = createOrdersActivity(
+    mission.stations,
+    "final",
+    now,
+    mission.endsAt,
+    dependencies,
+  );
+  return [
+    {
+      kind: "procedure-expired",
+      procedureId: activity.procedure.id,
+    },
+    { kind: "activity-started", activity: "orders" },
+  ];
 }
 
 function completeTaskAt(
   mission: MissionState,
+  activity: OrdersActivity,
   taskIndex: number,
   now: number,
   dependencies: MissionDependencies,
 ): MissionUpdate {
-  const completed = mission.tasks[taskIndex];
+  const completed = activity.tasks[taskIndex];
   if (completed === undefined) {
     throw new Error("Cannot complete a missing task");
   }
@@ -479,7 +943,7 @@ function completeTaskAt(
   mission.score += points;
   mission.combo += 1;
   mission.integrity = Math.min(100, mission.integrity + COMPLETION_REPAIR);
-  mission.tasks[taskIndex] = createTaskForRoute(
+  activity.tasks[taskIndex] = createTaskForRoute(
     completed.reader,
     stationForTask(completed),
     now,
@@ -501,17 +965,18 @@ function completeTaskAt(
 
 function expireTaskAt(
   mission: MissionState,
+  activity: OrdersActivity,
   taskIndex: number,
   now: number,
   dependencies: MissionDependencies,
 ): MissionOutcome {
-  const expired = mission.tasks[taskIndex];
+  const expired = activity.tasks[taskIndex];
   if (expired === undefined) {
     throw new Error("Cannot expire a missing task");
   }
   mission.integrity = Math.max(0, mission.integrity - EXPIRED_TASK_DAMAGE);
   mission.combo = 0;
-  mission.tasks[taskIndex] = createTaskForRoute(
+  activity.tasks[taskIndex] = createTaskForRoute(
     expired.reader,
     stationForTask(expired),
     now,
@@ -524,6 +989,66 @@ function expireTaskAt(
     reader: expired.reader,
     target: stationForTask(expired),
   };
+}
+
+function reactorTargetsAreSet(
+  mission: MissionState,
+  activity: ReactorProcedureActivity,
+): boolean {
+  return activity.procedure.profile.targets.every(
+    (target) =>
+      Math.abs(mission.uf8Faders[target.channel] - target.stop.value) <=
+      activity.procedure.tolerance,
+  );
+}
+
+function readerForTarget(
+  stations: MissionStations,
+  target: Station,
+): Station {
+  for (let index = 0; index < stations.length; index += 1) {
+    if (stations[(index + 1) % stations.length] === target) {
+      const reader = stations[index];
+      if (reader === undefined) {
+        throw new Error("Procedure reader route is missing");
+      }
+      return reader;
+    }
+  }
+  throw new Error(`No reader routes to ${target}`);
+}
+
+function stationForEvent(event: HardwareEvent): Station {
+  switch (event.kind) {
+    case "streamdeck-key":
+      return "streamdeck";
+    case "uf8-fader":
+      return "uf8";
+    case "push-pad":
+    case "push-defend-failed":
+      return "push";
+  }
+}
+
+function isPushCorner(point: GridPoint): boolean {
+  return PUSH_CORNERS.some((corner) => samePoint(corner, point));
+}
+
+function samePoint(left: GridPoint, right: GridPoint): boolean {
+  return left.x === right.x && left.y === right.y;
+}
+
+function copyUf8Faders(values: Uf8FaderValues): Uf8FaderValues {
+  return [
+    values[0],
+    values[1],
+    values[2],
+    values[3],
+    values[4],
+    values[5],
+    values[6],
+    values[7],
+  ];
 }
 
 function randomInteger(random: () => number, minimum: number, maximum: number) {

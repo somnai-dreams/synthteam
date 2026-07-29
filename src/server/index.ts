@@ -18,7 +18,7 @@ import type {
   MissionStations,
   ActivePushTask,
   Station,
-  StreamDeckRouteTask,
+  Uf8FaderValues,
 } from "../shared/domain.ts";
 import {
   STATIONS,
@@ -37,7 +37,7 @@ import type {
 } from "../shared/protocol.ts";
 import {
   parseClientMessage,
-  publicOrderForReader,
+  publicDirectiveForStation,
 } from "../shared/protocol.ts";
 
 type ViewerIdentity =
@@ -68,7 +68,7 @@ const crew: CrewSlots = {
 };
 const sockets: Bun.ServerWebSocket<SocketData>[] = [];
 const activity: ActivityItem[] = [];
-const uf8FaderValues = [0, 0, 0, 0, 0, 0, 0, 0];
+const uf8FaderValues: Uf8FaderValues = [0, 0, 0, 0, 0, 0, 0, 0];
 let game: GameState = { kind: "lobby" };
 let shuttingDown = false;
 
@@ -312,7 +312,12 @@ function tick(): void {
       if (now >= game.endsAt) {
         game = {
           kind: "playing",
-          mission: createMission(now, game.stations),
+          mission: createMission(
+            now,
+            game.stations,
+            undefined,
+            uf8FaderValues,
+          ),
         };
         addActivity("All systems live", "success");
         broadcastSnapshots();
@@ -343,6 +348,40 @@ function recordOutcomes(outcomes: readonly MissionOutcome[]): void {
         break;
       case "expired":
         addActivity(`${stationName(outcome.target)} order expired`, "danger");
+        break;
+      case "activity-started":
+        switch (outcome.activity) {
+          case "orders":
+            addActivity("Cross-channel orders resumed", "neutral");
+            break;
+          case "local-overrides":
+            addActivity("Local overrides — act alone", "neutral");
+            break;
+          case "reactor-procedure":
+            addActivity("Reactor procedure active", "danger");
+            break;
+        }
+        break;
+      case "local-override-completed":
+        addActivity(
+          `${stationName(outcome.station)} override cleared · +${outcome.points}`,
+          "success",
+        );
+        break;
+      case "local-override-expired":
+        addActivity(
+          `${stationName(outcome.station)} override missed`,
+          "danger",
+        );
+        break;
+      case "procedure-completed":
+        addActivity(
+          `Reactor calibrated · +${outcome.points}`,
+          "success",
+        );
+        break;
+      case "procedure-expired":
+        addActivity("Reactor procedure failed", "danger");
         break;
       case "mission-ended": {
         if (game.kind !== "playing") {
@@ -407,9 +446,9 @@ function snapshotFor(
       const snapshot: PhoneSnapshot = {
         ...base,
         viewer,
-        order:
+        directive:
           game.kind === "playing"
-            ? publicOrderForReader(game.mission, viewer.station)
+            ? publicDirectiveForStation(game.mission, viewer.station)
             : null,
       };
       return snapshot;
@@ -421,11 +460,14 @@ function snapshotFor(
         mission:
           game.kind === "playing"
             ? {
-                tasks: game.mission.tasks,
+                activity: game.mission.activity,
                 streamDeckKeys: game.mission.streamDeckKeys,
               }
             : null,
-        uf8Faders: uf8FaderValues,
+        uf8Faders:
+          game.kind === "playing"
+            ? game.mission.uf8Faders
+            : uf8FaderValues,
       };
       return snapshot;
     }
@@ -433,19 +475,40 @@ function snapshotFor(
 }
 
 function syncUf8Display(): void {
-  const activeTask =
-    game.kind === "playing"
-      ? game.mission.tasks.find((task) => task.kind === "uf8-fader")
-      : undefined;
   const view: Uf8DisplayView = {
-    strips: UF8_CONTROL_LABELS.map((label, channel) => ({
+    strips: UF8_CONTROL_LABELS.map((label) => ({
       label,
-      target:
-        activeTask !== undefined && activeTask.channel === channel
-          ? activeTask.target.label
-          : null,
+      cue: null,
     })),
   };
+  if (game.kind === "playing") {
+    switch (game.mission.activity.kind) {
+      case "orders":
+        break;
+      case "local-overrides": {
+        const override = game.mission.activity.tasks.find(
+          (task) => task.kind === "uf8-bottom-out",
+        );
+        if (override !== undefined) {
+          for (const strip of view.strips) {
+            strip.cue = { heading: "LOCAL", value: "DOWN!" };
+          }
+        }
+        break;
+      }
+      case "reactor-procedure": {
+        const strip = view.strips[2];
+        if (strip === undefined) {
+          throw new Error("UF8 reactor code display is missing");
+        }
+        strip.cue = {
+          heading: "REPORT CODE",
+          value: game.mission.activity.procedure.profile.code,
+        };
+        break;
+      }
+    }
+  }
   uf8.render(view);
 }
 
@@ -453,10 +516,25 @@ function streamDeckState() {
   if (game.kind !== "playing") {
     return { keys: [], task: null };
   }
-  const task = game.mission.tasks.find(
-    (candidate): candidate is StreamDeckRouteTask =>
-      candidate.kind === "streamdeck-route",
-  );
+  let task = null;
+  switch (game.mission.activity.kind) {
+    case "orders":
+      task =
+        game.mission.activity.tasks.find(
+          (candidate) =>
+            candidate.kind === "streamdeck-route" ||
+            candidate.kind === "streamdeck-sequence",
+        ) ?? null;
+      break;
+    case "local-overrides":
+      task =
+        game.mission.activity.tasks.find(
+          (candidate) => candidate.kind === "streamdeck-hit",
+        ) ?? null;
+      break;
+    case "reactor-procedure":
+      break;
+  }
   return {
     keys: game.mission.streamDeckKeys,
     task: task ?? null,
@@ -467,10 +545,14 @@ function pushState(): PushStateView {
   if (game.kind !== "playing") {
     return { phase: phaseView(), task: null };
   }
-  const task = game.mission.tasks.find(
-    (candidate): candidate is ActivePushTask =>
-      candidate.kind === "push-path" || candidate.kind === "push-defend",
-  );
+  const task =
+    game.mission.activity.kind === "orders"
+      ? game.mission.activity.tasks.find(
+          (candidate): candidate is ActivePushTask =>
+            candidate.kind === "push-path" ||
+            candidate.kind === "push-defend",
+        )
+      : undefined;
   return { phase: phaseView(), task: task ?? null };
 }
 
@@ -487,6 +569,7 @@ function phaseView(): MissionPhaseView {
         score: game.mission.score,
         integrity: game.mission.integrity,
         combo: game.mission.combo,
+        activity: game.mission.activity.kind,
       };
     case "game-over":
       return {

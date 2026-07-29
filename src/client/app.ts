@@ -3,13 +3,22 @@ import type {
   CrewSlots,
   GridPoint,
   HardwareEvent,
+  LocalOverrideTask,
+  MissionActivity,
+  PushCornersOverride,
+  PushPathTask,
   Station,
+  StreamDeckHitOverride,
+  StreamDeckRouteTask,
+  StreamDeckSequenceTask,
+  Uf8FaderTask,
 } from "../shared/domain.ts";
 import { STATIONS, stationForTask } from "../shared/domain.ts";
 import type {
   ClientMessage,
   ConsoleSnapshot,
   MissionPhaseView,
+  PhoneDirective,
   PhoneSnapshot,
   ViewSnapshot,
 } from "../shared/protocol.ts";
@@ -192,8 +201,12 @@ function phoneShellMarkup(phone: PhoneSnapshot): string {
   if (member === null) {
     throw new Error("Phone viewer has no crew member");
   }
+  const activityClass =
+    phone.phase.kind === "playing"
+      ? ` mode-${phone.phase.activity}`
+      : "";
   return `
-    <main class="phone-shell station-${phone.viewer.station}">
+    <main class="phone-shell station-${phone.viewer.station}${activityClass}">
       <header class="phone-topbar">
         <div>
           <div class="eyebrow">${stationShortName(phone.viewer.station)} CREW</div>
@@ -234,23 +247,13 @@ function phonePhaseMarkup(phone: PhoneSnapshot): string {
         </section>
       `;
     case "playing":
-      if (phone.order === null) {
-        throw new Error("Playing phone snapshot has no order");
+      if (phone.directive === null) {
+        throw new Error("Playing phone snapshot has no directive");
       }
       return `
         <section class="mission-phone">
           ${missionMeterMarkup(phone.phase)}
-          <div class="order-card" data-order-id="${phone.order.id}">
-            <div class="order-kicker">
-              <span>SHOUT THIS</span>
-              <strong>TO ${stationShortName(phone.order.target)}</strong>
-            </div>
-            <h2>${escapeHtml(phone.order.prompt)}</h2>
-            <div class="deadline-track">
-              <i data-deadline="${phone.order.deadlineAt}"></i>
-            </div>
-          </div>
-          <p class="phone-instruction">Do not perform this action yourself. Make the other operator hear you.</p>
+          ${phoneDirectiveMarkup(phone.directive)}
         </section>
       `;
     case "game-over":
@@ -265,6 +268,101 @@ function phonePhaseMarkup(phone: PhoneSnapshot): string {
   }
 }
 
+function phoneDirectiveMarkup(directive: PhoneDirective): string {
+  switch (directive.kind) {
+    case "order":
+      return `
+        <div class="order-card directive-card directive-order" data-directive-id="${directive.id}">
+          <div class="order-kicker">
+            <span>SHOUT THIS</span>
+            <strong>TO ${stationShortName(directive.target)}</strong>
+          </div>
+          <h2>${escapeHtml(directive.prompt)}</h2>
+          ${deadlineMarkup(directive)}
+        </div>
+        <p class="phone-instruction">Do not perform this action yourself. Make the other operator hear you.</p>
+      `;
+    case "local-override":
+      return `
+        <div class="order-card directive-card directive-local" data-directive-id="${directive.id}">
+          <div class="order-kicker">
+            <span>LOCAL OVERRIDE</span>
+            <strong>DO THIS YOURSELF</strong>
+          </div>
+          <h2>${escapeHtml(directive.prompt)}</h2>
+          ${deadlineMarkup(directive)}
+        </div>
+        <p class="phone-instruction is-local">Use your own ${stationShortName(directive.station)} controls. Do not shout this order away.</p>
+      `;
+    case "reactor-manual":
+      return `
+        <div class="order-card directive-card directive-procedure" data-directive-id="${directive.id}">
+          <div class="order-kicker">
+            <span>PROCEDURE MANUAL</span>
+            <strong>ASK UF8 FOR CODE</strong>
+          </div>
+          <h2>REACTOR CALIBRATION</h2>
+          <div class="procedure-table">
+            ${directive.profiles
+              .map(
+                (profile) => `
+                  <div>
+                    <strong>${profile.code}</strong>
+                    <span>${profile.targets
+                      .map(
+                        (target) =>
+                          `${target.label} ${target.stop.label}`,
+                      )
+                      .join(" · ")}</span>
+                  </div>
+                `,
+              )
+              .join("")}
+          </div>
+          ${deadlineMarkup(directive)}
+        </div>
+        <p class="phone-instruction">The UF8 operator can see the code. Make them report it, then read the matching row aloud.</p>
+      `;
+    case "reactor-operator":
+      return `
+        <div class="order-card directive-card directive-procedure operator-procedure" data-directive-id="${directive.id}">
+          <div class="order-kicker">
+            <span>REACTOR PROCEDURE</span>
+            <strong>YOU HAVE THE SYMPTOM</strong>
+          </div>
+          <h2>${escapeHtml(directive.prompt)}</h2>
+          ${deadlineMarkup(directive)}
+        </div>
+        <p class="phone-instruction">Read the code on the CORE PRESSURE display. Another phone has the calibration table.</p>
+      `;
+    case "reactor-support":
+      return `
+        <div class="order-card directive-card directive-procedure support-procedure" data-directive-id="${directive.id}">
+          <div class="order-kicker">
+            <span>REACTOR PROCEDURE</span>
+            <strong>CREW SUPPORT</strong>
+          </div>
+          <h2>${escapeHtml(directive.prompt)}</h2>
+          ${deadlineMarkup(directive)}
+        </div>
+        <p class="phone-instruction">Repeat the code and targets. Catch communication mistakes before the timer runs out.</p>
+      `;
+  }
+}
+
+function deadlineMarkup(
+  directive: PhoneDirective,
+): string {
+  return `
+    <div class="deadline-track">
+      <i
+        data-deadline="${directive.deadlineAt}"
+        data-started-at="${directive.startedAt}"
+      ></i>
+    </div>
+  `;
+}
+
 function renderConsole(): void {
   if (snapshot === null || !isConsoleSnapshot(snapshot)) {
     app.innerHTML = `
@@ -276,7 +374,7 @@ function renderConsole(): void {
     `;
     return;
   }
-  midiBridge?.syncMission(snapshot.mission?.tasks ?? []);
+  midiBridge?.syncActivity(snapshot.mission?.activity ?? null);
   app.innerHTML = consoleMarkup(snapshot);
   bindConsoleActions(snapshot);
 }
@@ -333,9 +431,7 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
       return `
         <section class="console-mission">
           ${missionMeterMarkup(consoleSnapshot.phase)}
-          <div class="task-overview task-count-${consoleSnapshot.mission.tasks.length}">
-            ${consoleSnapshot.mission.tasks.map((task) => taskCard(task, consoleSnapshot)).join("")}
-          </div>
+          ${activityOverviewMarkup(consoleSnapshot)}
           <div class="simulator">
             <div class="simulator-heading">
               <div>
@@ -383,6 +479,94 @@ function consoleStationCard(
   `;
 }
 
+function activityOverviewMarkup(
+  consoleSnapshot: ConsoleSnapshot,
+): string {
+  const mission = consoleSnapshot.mission;
+  if (mission === null) {
+    throw new Error("Activity overview requires an active mission");
+  }
+  switch (mission.activity.kind) {
+    case "orders":
+      return `
+        <div class="activity-banner mode-orders">
+          <span>ORDERS</span>
+          <strong>SHOUT ACROSS THE CREW</strong>
+        </div>
+        <div class="task-overview task-count-${mission.activity.tasks.length}">
+          ${mission.activity.tasks
+            .map((task) => taskCard(task, consoleSnapshot))
+            .join("")}
+        </div>
+      `;
+    case "local-overrides":
+      return `
+        <div class="activity-banner mode-local-overrides">
+          <span>LOCAL OVERRIDES</span>
+          <strong>EVERY OPERATOR ACTS ALONE</strong>
+        </div>
+        <div class="task-overview task-count-${mission.activity.tasks.length}">
+          ${mission.activity.tasks.map(localOverrideCard).join("")}
+        </div>
+      `;
+    case "reactor-procedure": {
+      const procedure = mission.activity.procedure;
+      const reader = consoleSnapshot.crew[procedure.reader];
+      return `
+        <div class="activity-banner mode-reactor-procedure">
+          <span>PROCEDURE</span>
+          <strong>REPORT → LOOK UP → CALIBRATE</strong>
+        </div>
+        <div class="procedure-overview">
+          <article class="task-card station-uf8 procedure-card">
+            <div class="task-route">
+              <span>${reader === null ? stationShortName(procedure.reader) : escapeHtml(reader.name)} HAS MANUAL</span>
+              <strong>→ UF8</strong>
+            </div>
+            <p>CODE ${procedure.profile.code}</p>
+            <small>${procedure.profile.targets
+              .map(
+                (target) => `${target.label} ${target.stop.label}`,
+              )
+              .join(" · ")}</small>
+          </article>
+        </div>
+      `;
+    }
+  }
+}
+
+function localOverrideCard(task: LocalOverrideTask): string {
+  let prompt: string;
+  let progress: string;
+  switch (task.kind) {
+    case "streamdeck-hit":
+      prompt = "HIT THE CALLOUT";
+      progress = task.completed ? "CLEARED" : "WAITING";
+      break;
+    case "uf8-bottom-out":
+      prompt = "BOTTOM OUT";
+      progress = task.completed ? "CLEARED" : "ALL FADERS TO −INF";
+      break;
+    case "push-corners":
+      prompt = "CORNERS";
+      progress = task.completed
+        ? "CLEARED"
+        : `${task.pressed.length}/4 PADS`;
+      break;
+  }
+  return `
+    <article class="task-card station-${task.station} ${task.completed ? "is-complete" : ""}">
+      <div class="task-route">
+        <span>LOCAL CONTROL</span>
+        <strong>${stationShortName(task.station)}</strong>
+      </div>
+      <p>${prompt}</p>
+      <small>${progress}</small>
+    </article>
+  `;
+}
+
 function taskCard(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): string {
   const reader = consoleSnapshot.crew[task.reader];
   return `
@@ -398,10 +582,36 @@ function taskCard(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): string {
 }
 
 function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
-  if (consoleSnapshot.mission === null) {
+  const mission = consoleSnapshot.mission;
+  if (mission === null) {
     return "";
   }
-  const active = taskByKind(consoleSnapshot.mission.tasks, "streamdeck-route");
+  let active:
+    | StreamDeckRouteTask
+    | StreamDeckSequenceTask
+    | StreamDeckHitOverride
+    | null = null;
+  switch (mission.activity.kind) {
+    case "orders":
+      active =
+        mission.activity.tasks.find(
+          (
+            task,
+          ): task is StreamDeckRouteTask | StreamDeckSequenceTask =>
+            task.kind === "streamdeck-route" ||
+            task.kind === "streamdeck-sequence",
+        ) ?? null;
+      break;
+    case "local-overrides":
+      active =
+        mission.activity.tasks.find(
+          (task): task is StreamDeckHitOverride =>
+            task.kind === "streamdeck-hit",
+        ) ?? null;
+      break;
+    case "reactor-procedure":
+      break;
+  }
   if (active === null) {
     return "";
   }
@@ -409,15 +619,11 @@ function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
     <section class="sim-panel deck-panel">
       <header><span>01</span><strong>STREAM DECK</strong></header>
       <div class="deck-grid">
-        ${consoleSnapshot.mission.streamDeckKeys
+        ${mission.streamDeckKeys
           .map(
             (key) => `
               <button
-                class="deck-key color-${key.color} ${
-                  key.index === active.sourceKeyIndex && active.progress === 1
-                    ? "is-armed"
-                    : ""
-                }"
+                class="deck-key color-${key.color} ${deckKeyState(active, key.index)}"
                 data-deck-key="${key.index}"
               >${escapeHtml(key.label)}</button>
             `,
@@ -428,12 +634,33 @@ function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
   `;
 }
 
+function deckKeyState(
+  task: StreamDeckRouteTask | StreamDeckSequenceTask | StreamDeckHitOverride,
+  keyIndex: number,
+): string {
+  switch (task.kind) {
+    case "streamdeck-route":
+      return keyIndex === task.sourceKeyIndex && task.progress === 1
+        ? "is-armed"
+        : "";
+    case "streamdeck-sequence":
+      if (keyIndex === task.holdKeyIndex && task.progress > 0) {
+        return "is-armed";
+      }
+      return keyIndex === task.tapKeyIndex && task.progress === 1
+        ? "is-called"
+        : "";
+    case "streamdeck-hit":
+      return keyIndex === task.keyIndex ? "is-override-target" : "";
+  }
+}
+
 function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
-  if (consoleSnapshot.mission === null) {
+  const mission = consoleSnapshot.mission;
+  if (mission === null) {
     return "";
   }
-  const active = taskByKind(consoleSnapshot.mission.tasks, "uf8-fader");
-  if (active === null) {
+  if (consoleSnapshot.crew.uf8?.connected !== true) {
     return "";
   }
   return `
@@ -441,12 +668,12 @@ function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
       <header><span>02</span><strong>SSL UF8</strong></header>
       <div class="fader-bank">
         ${Array.from({ length: 8 }, (_, channel) => {
-          const isTarget = channel === active.channel;
+          const cue = uf8SimulatorCue(mission.activity, channel);
           return `
-            <label class="fader-strip ${isTarget ? "is-target" : ""}">
+            <label class="fader-strip ${cue.isTarget ? "is-target" : ""}">
               <span>CH ${channel + 1}</span>
-              <input data-uf8-fader="${channel}" type="range" min="0" max="100" value="50" orient="vertical" />
-              <small>${isTarget ? escapeHtml(active.label) : "—"}</small>
+              <input data-uf8-fader="${channel}" type="range" min="0" max="100" value="${Math.round(consoleSnapshot.uf8Faders[channel] ?? 0)}" orient="vertical" />
+              <small>${escapeHtml(cue.label)}</small>
             </label>
           `;
         }).join("")}
@@ -455,11 +682,60 @@ function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
   `;
 }
 
+function uf8SimulatorCue(
+  activity: MissionActivity,
+  channel: number,
+): { isTarget: boolean; label: string } {
+  switch (activity.kind) {
+    case "orders": {
+      const task = activity.tasks.find(
+        (candidate): candidate is Uf8FaderTask =>
+          candidate.kind === "uf8-fader",
+      );
+      if (task === undefined || channel !== task.channel) {
+        return { isTarget: false, label: "—" };
+      }
+      return { isTarget: true, label: task.label };
+    }
+    case "local-overrides":
+      return { isTarget: true, label: "TO −INF" };
+    case "reactor-procedure": {
+      const target = activity.procedure.profile.targets.find(
+        (candidate) => candidate.channel === channel,
+      );
+      return target === undefined
+        ? { isTarget: false, label: "—" }
+        : {
+            isTarget: true,
+            label: `${target.label} ${target.stop.label}`,
+          };
+    }
+  }
+}
+
 function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
-  if (consoleSnapshot.mission === null) {
+  const mission = consoleSnapshot.mission;
+  if (mission === null) {
     return "";
   }
-  const active = taskByKind(consoleSnapshot.mission.tasks, "push-path");
+  let active: PushPathTask | PushCornersOverride | null = null;
+  switch (mission.activity.kind) {
+    case "orders":
+      active =
+        mission.activity.tasks.find(
+          (task): task is PushPathTask => task.kind === "push-path",
+        ) ?? null;
+      break;
+    case "local-overrides":
+      active =
+        mission.activity.tasks.find(
+          (task): task is PushCornersOverride =>
+            task.kind === "push-corners",
+        ) ?? null;
+      break;
+    case "reactor-procedure":
+      break;
+  }
   if (active === null) {
     return "";
   }
@@ -469,23 +745,48 @@ function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
       <div class="push-grid">
         ${gridPoints()
           .map((point) => {
-            const pathIndex = active.path.findIndex(
-              (candidate) => candidate.x === point.x && candidate.y === point.y,
-            );
-            const state =
-              pathIndex < 0
-                ? ""
-                : pathIndex < active.progress
-                  ? "is-complete"
-                  : pathIndex === active.progress
-                    ? `is-path is-next color-${active.color}`
-                    : `is-path color-${active.color}`;
+            const state = pushPadState(active, point);
             return `<button class="push-pad ${state}" data-push-x="${point.x}" data-push-y="${point.y}" aria-label="Push pad ${point.x + 1}, ${point.y + 1}"></button>`;
           })
           .join("")}
       </div>
     </section>
   `;
+}
+
+function pushPadState(
+  task: PushPathTask | PushCornersOverride,
+  point: GridPoint,
+): string {
+  switch (task.kind) {
+    case "push-path": {
+      const pathIndex = task.path.findIndex(
+        (candidate) => candidate.x === point.x && candidate.y === point.y,
+      );
+      if (pathIndex < 0) {
+        return "";
+      }
+      if (pathIndex < task.progress) {
+        return "is-complete";
+      }
+      return pathIndex === task.progress
+        ? `is-path is-next color-${task.color}`
+        : `is-path color-${task.color}`;
+    }
+    case "push-corners": {
+      const isCorner =
+        (point.x === 0 || point.x === 7) &&
+        (point.y === 0 || point.y === 7);
+      if (!isCorner) {
+        return "";
+      }
+      const pressed = task.pressed.some(
+        (candidate) =>
+          candidate.x === point.x && candidate.y === point.y,
+      );
+      return pressed ? "is-complete" : "is-path is-next color-lime";
+    }
+  }
 }
 
 function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
@@ -502,10 +803,16 @@ function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-deck-key]")) {
     button.addEventListener("click", () => {
       const keyIndex = Number(button.dataset["deckKey"]);
+      if (consoleSnapshot.mission === null) {
+        throw new Error("Deck simulator requires an active mission");
+      }
       sendHardware({
         kind: "streamdeck-key",
         keyIndex,
-        phase: "down",
+        phase: simulatedDeckPhase(
+          consoleSnapshot.mission.activity,
+          keyIndex,
+        ),
       });
     });
   }
@@ -532,6 +839,24 @@ function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
       });
     });
   }
+}
+
+function simulatedDeckPhase(
+  activity: MissionActivity,
+  keyIndex: number,
+): "down" | "up" {
+  if (activity.kind !== "orders") {
+    return "down";
+  }
+  const task = activity.tasks.find(
+    (candidate): candidate is StreamDeckSequenceTask =>
+      candidate.kind === "streamdeck-sequence",
+  );
+  return task !== undefined &&
+    task.progress === 2 &&
+    keyIndex === task.holdKeyIndex
+    ? "up"
+    : "down";
 }
 
 function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
@@ -775,6 +1100,16 @@ function taskDescription(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): st
       }
       return `ROUTE ${escapeHtml(source.label)} THROUGH ${escapeHtml(target.label)}`;
     }
+    case "streamdeck-sequence": {
+      const hold =
+        consoleSnapshot.mission.streamDeckKeys[task.holdKeyIndex];
+      const tap =
+        consoleSnapshot.mission.streamDeckKeys[task.tapKeyIndex];
+      if (hold === undefined || tap === undefined) {
+        throw new Error("Stream Deck sequence points outside layout");
+      }
+      return `HOLD ${escapeHtml(hold.label)}, TAP ${escapeHtml(tap.label)}, RELEASE ${escapeHtml(hold.label)}`;
+    }
     case "uf8-fader":
       return `SET ${escapeHtml(task.label)} TO ${escapeHtml(task.target.label)}`;
     case "push-path":
@@ -788,6 +1123,15 @@ function taskProgress(task: ActiveTask): string {
   switch (task.kind) {
     case "streamdeck-route":
       return task.progress === 0 ? "WAITING FOR SOURCE" : "SOURCE LOCKED";
+    case "streamdeck-sequence":
+      switch (task.progress) {
+        case 0:
+          return "WAITING FOR HOLD";
+        case 1:
+          return "HELD — WAITING FOR TAP";
+        case 2:
+          return "TAPPED — RELEASE HOLD";
+      }
     case "uf8-fader":
       return task.withinSince === null ? "OUTSIDE TARGET BAND" : "HOLDING";
     case "push-path":
@@ -795,17 +1139,6 @@ function taskProgress(task: ActiveTask): string {
     case "push-defend":
       return `SPEED ${task.missileSpeed} - SURVIVE TO DEADLINE`;
   }
-}
-
-function taskByKind<T extends ActiveTask["kind"]>(
-  tasks: readonly ActiveTask[],
-  kind: T,
-): Extract<ActiveTask, { kind: T }> | null {
-  const task = tasks.find(
-    (candidate): candidate is Extract<ActiveTask, { kind: T }> =>
-      candidate.kind === kind,
-  );
-  return task ?? null;
 }
 
 function updateLiveNumbers(): void {
@@ -821,8 +1154,10 @@ function updateLiveNumbers(): void {
   }
   for (const element of document.querySelectorAll<HTMLElement>("[data-deadline]")) {
     const deadline = Number(element.dataset["deadline"]);
+    const startedAt = Number(element.dataset["startedAt"]);
     const remaining = Math.max(0, deadline - now);
-    element.style.scale = `${Math.min(1, remaining / 13_000)} 1`;
+    const duration = deadline - startedAt;
+    element.style.scale = `${Math.min(1, remaining / duration)} 1`;
   }
 }
 

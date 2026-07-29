@@ -48,11 +48,14 @@ describe("UF8 direct runtime boundary", () => {
     ).toBeNull();
   });
 
-  test("renders all control names and the active target", () => {
+  test("renders all control names and a contextual hardware cue", () => {
     const frames = createUf8DisplayFrames({
       strips: UF8_CONTROL_LABELS.map((label, index) => ({
         label,
-        target: index === 2 ? "-20 DB" : null,
+        cue:
+          index === 2
+            ? { heading: "REPORT CODE", value: "BETA" }
+            : null,
       })),
     });
     const decoder = new Uf8FrameDecoder();
@@ -68,7 +71,7 @@ describe("UF8 direct runtime boundary", () => {
 
     expect(frames).toHaveLength(58);
     expect(text).toContain("CORE PRESSURE");
-    expect(text).toContain("TARGET");
-    expect(text).toContain("-20 DB");
+    expect(text).toContain("REPORT CODE");
+    expect(text).toContain("BETA");
   });
 });
