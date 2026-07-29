@@ -546,64 +546,59 @@ function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
   const pushBridgeStatus = consoleSnapshot.pushBridgeConnected
     ? "CONNECTED"
     : "WEB MIDI OR BRIDGE";
+  const uf8Connected = consoleSnapshot.uf8Connection.kind === "connected";
+  const uf8Status = uf8Connected ? "DIRECT LINK" : "RECONNECTING";
+  const uf8Detail =
+    consoleSnapshot.uf8Connection.kind === "connected"
+      ? `Serial ${consoleSnapshot.uf8Connection.serial} · custom displays and 8 faders`
+      : consoleSnapshot.uf8Connection.message;
   let midiContent = "";
   switch (view.status) {
     case "unsupported":
       midiContent = `
-        <p class="hardware-note">Web MIDI is unavailable. Open the central console in Chrome on the hardware laptop.</p>
+        <div class="midi-device station-push">
+          ${pushDeviceTitle("WEB MIDI UNAVAILABLE")}
+          <p class="hardware-note">Push setup needs Chrome Web MIDI on the hardware laptop.</p>
+        </div>
       `;
       break;
     case "idle":
     case "requesting":
       midiContent = `
-        <button id="enable-midi" class="secondary-button" ${view.status === "requesting" ? "disabled" : ""}>
-          ${view.status === "requesting" ? "REQUESTING MIDI…" : "ENABLE MIDI DEVICES"}
-        </button>
+        <div class="midi-device station-push">
+          ${pushDeviceTitle("NOT CONFIGURED")}
+          <button id="enable-midi" class="secondary-button" ${view.status === "requesting" ? "disabled" : ""}>
+            ${view.status === "requesting" ? "REQUESTING MIDI…" : "ENABLE PUSH MIDI"}
+          </button>
+        </div>
       `;
       break;
     case "error":
       midiContent = `
-        <p class="hardware-note is-error">${escapeHtml(view.error)}</p>
-        <button id="enable-midi" class="secondary-button">TRY MIDI AGAIN</button>
+        <div class="midi-device station-push">
+          ${pushDeviceTitle("MIDI ERROR")}
+          <p class="hardware-note is-error">${escapeHtml(view.error)}</p>
+          <button id="enable-midi" class="secondary-button">TRY PUSH MIDI AGAIN</button>
+        </div>
       `;
       break;
     case "ready":
       midiContent = `
-        <div class="midi-device-grid">
-          <div class="midi-device station-uf8">
-            <div class="hardware-device-title">
-              <span class="station-indicator"></span>
-              <strong>SSL UF8</strong>
-              <small>${view.configuration.uf8Faders.filter((binding) => binding !== null).length}/8 FADERS</small>
-            </div>
-            <label>
-              INPUT
-              <select id="uf8-midi-input">
-                ${midiOptions(view.inputs, view.configuration.uf8InputId, "Select UF8 MIDI input")}
-              </select>
-            </label>
-            <button id="learn-uf8" class="secondary-button">LEARN FADERS 1 → 8</button>
-          </div>
-          <div class="midi-device station-push">
-            <div class="hardware-device-title">
-              <span class="station-indicator"></span>
-              <strong>ABLETON PUSH</strong>
-              <small>${view.configuration.pushGrid === null ? "GRID UNMAPPED" : "GRID READY"}</small>
-            </div>
-            <label>
-              USER INPUT
-              <select id="push-midi-input">
-                ${midiOptions(view.inputs, view.configuration.pushInputId, "Select Push User input")}
-              </select>
-            </label>
-            <label>
-              USER OUTPUT
-              <select id="push-midi-output">
-                ${midiOptions(view.outputs, view.configuration.pushOutputId, "Select Push User output")}
-              </select>
-            </label>
-            <button id="learn-push" class="secondary-button">LEARN 3 GRID CORNERS</button>
-          </div>
+        <div class="midi-device station-push">
+          ${pushDeviceTitle(view.configuration.pushGrid === null ? "GRID UNMAPPED" : "GRID READY")}
+          <label>
+            USER INPUT
+            <select id="push-midi-input">
+              ${midiOptions(view.inputs, view.configuration.pushInputId, "Select Push User input")}
+            </select>
+          </label>
+          <label>
+            USER OUTPUT
+            <select id="push-midi-output">
+              ${midiOptions(view.outputs, view.configuration.pushOutputId, "Select Push User output")}
+            </select>
+          </label>
+          <button id="learn-push" class="secondary-button">LEARN 3 GRID CORNERS</button>
         </div>
       `;
       break;
@@ -615,14 +610,41 @@ function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
           <div class="eyebrow">DEVICE BRIDGE</div>
           <h2>Physical controls</h2>
         </div>
-        <div class="deck-bridge-state ${consoleSnapshot.streamDeckConnected ? "is-connected" : ""}">
-          <i></i><span>STREAM DECK</span><strong>${streamDeckStatus}</strong>
+        <div class="hardware-bridge-states">
+          <div class="deck-bridge-state ${consoleSnapshot.streamDeckConnected ? "is-connected" : ""}">
+            <i></i><span>STREAM DECK</span><strong>${streamDeckStatus}</strong>
+          </div>
+          <div class="deck-bridge-state ${uf8Connected ? "is-connected" : ""}">
+            <i></i><span>SSL UF8</span><strong>${uf8Status}</strong>
+          </div>
         </div>
         <div class="deck-bridge-state ${consoleSnapshot.pushBridgeConnected ? "is-connected" : ""}">
           <i></i><span>PUSH BRIDGE</span><strong>${pushBridgeStatus}</strong>
         </div>
       </div>
-      ${midiContent}
+      <div class="midi-device-grid">
+        <div class="midi-device station-uf8">
+          <div class="hardware-device-title">
+            <span class="station-indicator"></span>
+            <strong>SSL UF8</strong>
+            <small>${uf8Connected ? "SERVER OWNED" : "OFFLINE"}</small>
+          </div>
+          <p class="direct-device-note ${uf8Connected ? "" : "is-error"}">${escapeHtml(uf8Detail)}</p>
+          <div class="uf8-input-monitor" aria-label="Live UF8 fader input">
+            ${consoleSnapshot.uf8Faders
+              .map(
+                (value, channel) => `
+                  <div>
+                    <i style="--fader-level: ${Math.round(value)}%"></i>
+                    <span>${channel + 1}</span>
+                  </div>
+                `,
+              )
+              .join("")}
+          </div>
+        </div>
+        ${midiContent}
+      </div>
       ${
         view.learnText.length === 0
           ? ""
@@ -638,6 +660,16 @@ function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
   `;
 }
 
+function pushDeviceTitle(status: string): string {
+  return `
+    <div class="hardware-device-title">
+      <span class="station-indicator"></span>
+      <strong>ABLETON PUSH</strong>
+      <small>${status}</small>
+    </div>
+  `;
+}
+
 function bindMidiActions(): void {
   const bridge = midiBridge;
   if (bridge === null) {
@@ -646,15 +678,6 @@ function bindMidiActions(): void {
   document.querySelector("#enable-midi")?.addEventListener("click", () => {
     void bridge.requestAccess();
   });
-  document
-    .querySelector<HTMLSelectElement>("#uf8-midi-input")
-    ?.addEventListener("change", (event) => {
-      const select = event.currentTarget;
-      if (!(select instanceof HTMLSelectElement)) {
-        throw new Error("UF8 MIDI selection did not come from a select");
-      }
-      bridge.setUf8Input(select.value.length === 0 ? null : select.value);
-    });
   document
     .querySelector<HTMLSelectElement>("#push-midi-input")
     ?.addEventListener("change", (event) => {
@@ -673,9 +696,6 @@ function bindMidiActions(): void {
       }
       bridge.setPushOutput(select.value.length === 0 ? null : select.value);
     });
-  document.querySelector("#learn-uf8")?.addEventListener("click", () => {
-    bridge.learnUf8Bank();
-  });
   document.querySelector("#learn-push")?.addEventListener("click", () => {
     bridge.learnPushGrid();
   });
@@ -756,7 +776,7 @@ function taskDescription(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): st
       return `ROUTE ${escapeHtml(source.label)} THROUGH ${escapeHtml(target.label)}`;
     }
     case "uf8-fader":
-      return `SET ${escapeHtml(task.label)} TO ${task.target}`;
+      return `SET ${escapeHtml(task.label)} TO ${escapeHtml(task.target.label)}`;
     case "push-path":
       return `TRACE THE ${task.color.toUpperCase()} VECTOR`;
     case "push-defend":

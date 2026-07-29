@@ -11,7 +11,12 @@ import type {
   StreamDeckKey,
   StreamDeckKeyColor,
 } from "../shared/domain.ts";
-import { STATIONS, stationForTask } from "../shared/domain.ts";
+import {
+  STATIONS,
+  stationForTask,
+  UF8_CONTROL_LABELS,
+  UF8_FADER_STOPS,
+} from "../shared/domain.ts";
 
 const MISSION_DURATION_MS = 90_000;
 const TASK_DURATION_MS = 13_000;
@@ -63,17 +68,6 @@ const STREAM_DECK_LABELS = [
   "CINDER",
   "PHASE",
   "RELAY",
-] as const;
-
-const UF8_LABELS = [
-  "HULL SHEAR",
-  "ION BIAS",
-  "CORE PRESSURE",
-  "DRIFT",
-  "COOLANT",
-  "GRAVITY",
-  "PHASE LOAD",
-  "RESONANCE",
 ] as const;
 
 const STREAM_DECK_COLORS: readonly StreamDeckKeyColor[] = [
@@ -292,9 +286,16 @@ function createUf8Task(
   dependencies: MissionDependencies,
 ): ActiveTask {
   const channel = randomInteger(dependencies.random, 0, 7);
-  const label = UF8_LABELS[channel];
+  const label = UF8_CONTROL_LABELS[channel];
   if (label === undefined) {
     throw new Error("UF8 channel has no system label");
+  }
+  const target =
+    UF8_FADER_STOPS[
+      randomInteger(dependencies.random, 0, UF8_FADER_STOPS.length - 1)
+    ];
+  if (target === undefined) {
+    throw new Error("UF8 task has no physical fader stop");
   }
   return {
     kind: "uf8-fader",
@@ -304,7 +305,7 @@ function createUf8Task(
     deadlineAt: now + TASK_DURATION_MS,
     channel,
     label,
-    target: randomInteger(dependencies.random, 2, 18) * 5,
+    target,
     tolerance: 3,
     holdMs: UF8_HOLD_MS,
     withinSince: null,
@@ -421,7 +422,7 @@ function applyEventToTask(
       if (event.kind !== "uf8-fader" || event.channel !== task.channel) {
         return "ignored";
       }
-      if (Math.abs(event.value - task.target) <= task.tolerance) {
+      if (Math.abs(event.value - task.target.value) <= task.tolerance) {
         task.withinSince ??= now;
       } else {
         task.withinSince = null;

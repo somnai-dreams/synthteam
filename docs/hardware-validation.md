@@ -59,3 +59,23 @@ exclusively.
 
 See [`uf8-reverse-engineering.md`](./uf8-reverse-engineering.md) for the exact
 evidence boundary and reproduction commands.
+
+## 2026-07-28 · server-owned UF8 mission pass
+
+The direct protocol was integrated into the Bun server and verified with the
+attached UF8 while SSL 360 was stopped:
+
+- the server completed the full direct handshake and held the connection;
+- all eight screens showed their gameplay control names without the previous
+  horizontal offset;
+- the web console reported the attached serial as **DIRECT LINK**;
+- the native input monitor received the initial fader bank at normalized
+  positions `67, 70, 28, 28, 4, 48, 2, 20`;
+- server motor commands moved all eight faders to approximately `1%`;
+- a two-phone mission delivered `SET HULL SHEAR TO -40 DB` to the remote
+  reader and the same control/target to the UF8 display;
+- holding the normalized `-40 DB` stop completed a UF8 task for 100 points.
+
+The remaining hardware gates are the exported Stream Deck profile, identifying
+and integrating the disconnected Push, and completing a full 90-second
+no-simulator mission.

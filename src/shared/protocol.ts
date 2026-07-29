@@ -7,6 +7,7 @@ import type {
   Station,
   StreamDeckKey,
   StreamDeckRouteTask,
+  Uf8ConnectionState,
 } from "./domain.ts";
 import {
   describeTask,
@@ -59,6 +60,7 @@ type SnapshotBase = {
   phoneUrls: readonly string[];
   streamDeckConnected: boolean;
   pushBridgeConnected: boolean;
+  uf8Connection: Uf8ConnectionState;
 };
 
 export type AnonymousSnapshot = SnapshotBase & {
@@ -77,6 +79,7 @@ export type PhoneSnapshot = SnapshotBase & {
 export type ConsoleSnapshot = SnapshotBase & {
   viewer: { kind: "console" };
   mission: ConsoleMissionView | null;
+  uf8Faders: readonly number[];
 };
 
 export type ViewSnapshot =
@@ -244,7 +247,8 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
     !Array.isArray(value.activity) ||
     !isStringArray(value.phoneUrls) ||
     typeof value.streamDeckConnected !== "boolean" ||
-    typeof value.pushBridgeConnected !== "boolean"
+    typeof value.pushBridgeConnected !== "boolean" ||
+    !isUf8ConnectionState(value["uf8Connection"])
   ) {
     return false;
   }
@@ -258,7 +262,26 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
         ("order" in value)
       );
     case "console":
-      return "mission" in value;
+      return (
+        "mission" in value &&
+        isNumberArrayInRange(value["uf8Faders"], 8, 0, 100)
+      );
+    default:
+      return false;
+  }
+}
+
+function isUf8ConnectionState(
+  value: unknown,
+): value is Uf8ConnectionState {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    return false;
+  }
+  switch (value.kind) {
+    case "disconnected":
+      return typeof value.message === "string";
+    case "connected":
+      return typeof value["serial"] === "string";
     default:
       return false;
   }
@@ -292,6 +315,19 @@ function isPhase(value: unknown): value is MissionPhaseView {
 
 function isStation(value: unknown): value is Station {
   return STATIONS.some((station) => station === value);
+}
+
+function isNumberArrayInRange(
+  value: unknown,
+  length: number,
+  minimum: number,
+  maximum: number,
+): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === length &&
+    value.every((item) => isNumberInRange(item, minimum, maximum))
+  );
 }
 
 function parseJson(raw: string): unknown {

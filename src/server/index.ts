@@ -5,6 +5,10 @@ import {
   applyHardwareEvent,
   createMission,
 } from "../game/mission.ts";
+import {
+  type Uf8DisplayView,
+  Uf8Runtime,
+} from "../hardware/uf8/runtime.ts";
 import type {
   CrewMember,
   CrewSlots,
@@ -16,7 +20,7 @@ import type {
   Station,
   StreamDeckRouteTask,
 } from "../shared/domain.ts";
-import { STATIONS } from "../shared/domain.ts";
+import { STATIONS, UF8_CONTROL_LABELS } from "../shared/domain.ts";
 import type {
   ActivityItem,
   ClientMessage,
@@ -60,7 +64,32 @@ const crew: CrewSlots = {
 };
 const sockets: Bun.ServerWebSocket<SocketData>[] = [];
 const activity: ActivityItem[] = [];
+const uf8FaderValues = [0, 0, 0, 0, 0, 0, 0, 0];
 let game: GameState = { kind: "lobby" };
+let shuttingDown = false;
+
+const uf8 = new Uf8Runtime({
+  onConnectionChange(state) {
+    switch (state.kind) {
+      case "disconnected":
+        addActivity(state.message, "danger");
+        break;
+      case "connected":
+        addActivity(`UF8 direct link ready · ${state.serial}`, "success");
+        syncUf8Display();
+        break;
+    }
+    broadcastSnapshots();
+  },
+  onFader(event) {
+    uf8FaderValues[event.channel] = event.value;
+    if (game.kind === "playing") {
+      applyGameHardwareEvent(event);
+      return;
+    }
+    broadcastSnapshots();
+  },
+});
 
 const port = parsePort(Bun.env["PORT"]);
 const phoneUrls = findPhoneUrls(port);
@@ -70,7 +99,7 @@ const server = Bun.serve<SocketData>({
   routes: {
     "/": app,
     "/console": app,
-    "/health": () => Response.json({ ok: true }),
+    "/health": () => Response.json({ ok: true, uf8: uf8.state }),
   },
   fetch(request, currentServer) {
     const url = new URL(request.url);
@@ -125,7 +154,15 @@ const server = Bun.serve<SocketData>({
   },
 });
 
-setInterval(tick, 50);
+const tickInterval = setInterval(tick, 50);
+uf8.start();
+
+process.once("SIGINT", () => {
+  void shutdown();
+});
+process.once("SIGTERM", () => {
+  void shutdown();
+});
 
 console.log(`Synthteam central server: http://localhost:${server.port}`);
 for (const url of phoneUrls) {
@@ -175,10 +212,7 @@ function handleMessage(
       ) {
         return;
       }
-      recordOutcomes(
-        applyHardwareEvent(game.mission, message.event, Date.now()).outcomes,
-      );
-      broadcastSnapshots();
+      applyGameHardwareEvent(message.event);
       return;
   }
 }
@@ -248,7 +282,18 @@ function startCountdown(socket: Bun.ServerWebSocket<SocketData>): void {
     return;
   }
   game = { kind: "countdown", endsAt: Date.now() + 3_000, stations };
+  uf8.zeroFaders();
   addActivity(`${stations.length}-crew mission begins in three`, "neutral");
+  broadcastSnapshots();
+}
+
+function applyGameHardwareEvent(event: HardwareEvent): void {
+  if (game.kind !== "playing") {
+    return;
+  }
+  recordOutcomes(
+    applyHardwareEvent(game.mission, event, Date.now()).outcomes,
+  );
   broadcastSnapshots();
 }
 
@@ -328,6 +373,7 @@ function sendSnapshot(socket: Bun.ServerWebSocket<SocketData>): void {
 }
 
 function broadcastSnapshots(): void {
+  syncUf8Display();
   for (const socket of sockets) {
     sendSnapshot(socket);
   }
@@ -347,6 +393,7 @@ function snapshotFor(
     pushBridgeConnected: sockets.some(
       (socket) => socket.data.viewer.kind === "push-bridge",
     ),
+    uf8Connection: uf8.state,
   };
   switch (viewer.kind) {
     case "anonymous":
@@ -373,10 +420,28 @@ function snapshotFor(
                 streamDeckKeys: game.mission.streamDeckKeys,
               }
             : null,
+        uf8Faders: uf8FaderValues,
       };
       return snapshot;
     }
   }
+}
+
+function syncUf8Display(): void {
+  const activeTask =
+    game.kind === "playing"
+      ? game.mission.tasks.find((task) => task.kind === "uf8-fader")
+      : undefined;
+  const view: Uf8DisplayView = {
+    strips: UF8_CONTROL_LABELS.map((label, channel) => ({
+      label,
+      target:
+        activeTask !== undefined && activeTask.channel === channel
+          ? activeTask.target.label
+          : null,
+    })),
+  };
+  uf8.render(view);
 }
 
 function streamDeckState() {
@@ -554,4 +619,14 @@ function connectedMissionStations(): MissionStations | null {
   }
   const third = connected[2];
   return third === undefined ? [first, second] : [first, second, third];
+}
+
+async function shutdown(): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  clearInterval(tickInterval);
+  await server.stop(true);
+  await uf8.stop();
 }

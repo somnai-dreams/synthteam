@@ -15,6 +15,42 @@ export type CrewMember = {
 
 export type CrewSlots = Record<Station, CrewMember | null>;
 
+export type Uf8ConnectionState =
+  | {
+      kind: "disconnected";
+      message: string;
+    }
+  | {
+      kind: "connected";
+      serial: string;
+    };
+
+export const UF8_CONTROL_LABELS = [
+  "HULL SHEAR",
+  "ION BIAS",
+  "CORE PRESSURE",
+  "DRIFT",
+  "COOLANT",
+  "GRAVITY",
+  "PHASE LOAD",
+  "RESONANCE",
+] as const;
+
+export const UF8_FADER_STOPS = [
+  { label: "+12 DB", value: 100 },
+  { label: "+6 DB", value: 86 },
+  { label: "0 DB", value: 75 },
+  { label: "-5 DB", value: 67 },
+  { label: "-10 DB", value: 58 },
+  { label: "-20 DB", value: 44 },
+  { label: "-30 DB", value: 32 },
+  { label: "-40 DB", value: 22 },
+  { label: "-60 DB", value: 10 },
+  { label: "-INF", value: 0 },
+] as const;
+
+export type Uf8FaderStop = (typeof UF8_FADER_STOPS)[number];
+
 export type StreamDeckKeyColor = "cyan" | "amber" | "magenta" | "green";
 
 export type StreamDeckKey = {
@@ -48,7 +84,7 @@ export type Uf8FaderTask = TaskBase & {
   kind: "uf8-fader";
   channel: number;
   label: string;
-  target: number;
+  target: Uf8FaderStop;
   tolerance: number;
   holdMs: number;
   withinSince: number | null;
@@ -182,7 +218,7 @@ export function describeTask(
       return `ROUTE ${source.label} THROUGH ${target.label}`;
     }
     case "uf8-fader":
-      return `SET ${task.label} TO ${task.target}`;
+      return `SET ${task.label} TO ${task.target.label}`;
     case "push-path":
       return `TRACE THE ${task.color.toUpperCase()} VECTOR`;
     case "push-defend":

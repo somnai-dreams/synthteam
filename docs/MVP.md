@@ -12,7 +12,7 @@ Phone: Deck crew ─┐
 Phone: UF8 crew ──┼─ Wi-Fi ─> central Bun server
 Phone: Push crew ─┘                 │
                                     ├─ Stream Deck XL plugin
-                                    ├─ SSL UF8 MIDI CC layer
+                                    ├─ SSL UF8 direct USB runtime
                                     └─ Ableton Push User MIDI port
 ```
 
@@ -35,9 +35,10 @@ add holds, chords, and ordered sequences without changing the game protocol.
 ### SSL UF8: reactor and propulsion
 
 The eight motorized faders are continuous system levels. The first MVP task asks
-the operator to move a named channel into a target band and hold it there. The
-MIDI CC layer is the initial integration surface; MCU/HUI display and motor
-feedback are deliberately deferred until input behavior is proven.
+the operator to move a named channel to one of the physical printed dB stops and
+hold it there. The Bun server owns the direct USB session, draws every control
+name and active target on the strip displays, receives native fader events, and
+zeros the motor bank at mission start.
 
 ### Ableton Push: navigation and sensors
 
@@ -77,5 +78,6 @@ Every external input is normalized at the adapter boundary into one of:
 - `push-pad`, with an 8×8 coordinate, down/up phase, and velocity.
 
 The Stream Deck plugin connects directly to the Bun WebSocket. The central
-Chrome console owns Web MIDI for UF8 and Push because it is served from the
-trusted `localhost` origin. Player phones do not request hardware permissions.
+Chrome console owns Web MIDI only for Push because it is served from the trusted
+`localhost` origin. The Bun server owns the exclusive UF8 USB connection.
+Player phones do not request hardware permissions.

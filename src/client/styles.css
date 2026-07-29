@@ -1026,6 +1026,13 @@ small {
   font-size: 1.55rem;
 }
 
+.hardware-bridge-states {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .deck-bridge-state {
   display: grid;
   grid-template-columns: 7px auto;
@@ -1170,6 +1177,68 @@ small {
 
 .midi-device select:focus {
   border-color: var(--station);
+}
+
+.midi-device > .secondary-button,
+.midi-device > .hardware-note,
+.direct-device-note {
+  grid-column: 1 / -1;
+}
+
+.direct-device-note {
+  min-height: 42px;
+  margin: 0;
+  padding: 11px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.62rem;
+  line-height: 1.45;
+}
+
+.direct-device-note.is-error {
+  color: var(--danger);
+}
+
+.uf8-input-monitor {
+  display: grid;
+  min-height: 58px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+}
+
+.uf8-input-monitor div {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 4px;
+}
+
+.uf8-input-monitor i {
+  position: relative;
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.uf8-input-monitor i::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: var(--fader-level);
+  background: var(--station);
+  box-shadow: 0 0 7px var(--station);
+  content: "";
+  transition: height 70ms linear;
+}
+
+.uf8-input-monitor span {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.48rem;
+  text-align: center;
 }
 
 .learn-banner {

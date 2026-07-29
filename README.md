@@ -19,7 +19,9 @@ development simulator.
 Requirements:
 
 - Bun 1.3 or newer;
-- Chrome on the central hardware laptop for Web MIDI;
+- SSL 360° installed, but not running, so Synthteam can load its bundled UF8
+  USB transport;
+- Chrome on the central hardware laptop if Push uses Web MIDI;
 - all phones and the central laptop on the same local network.
 
 ```sh
@@ -38,20 +40,24 @@ the routing cycle when it joins before launch.
 
 ### SSL UF8
 
-1. Connect the UF8 and open SSL 360°.
-2. Put the UF8 into its MIDI CC layer.
-3. Give its eight faders distinct CC assignments.
-4. In the Synthteam console, select the UF8 MIDI input.
-5. Choose **Learn faders 1 → 8**, then move each physical fader once in order.
+1. Install SSL 360° once, then quit the application and its background core.
+2. Connect the UF8 before starting Synthteam.
+3. Start Synthteam. The Bun server automatically opens the UF8 by serial number.
+4. Confirm **SSL UF8 · DIRECT LINK** and the eight live fader meters in the
+   central console.
 
-The mapping is validated and stored in the central browser's local storage.
-A fader task completes after the correct channel remains within its target
-tolerance for 450 ms.
+The server performs the UF8 identity, firmware, switch-chain, and display
+handshake; maintains the controller watchdog; owns all eight displays; receives
+native 15-bit fader events; and drives the fader motors. It zeros the bank when
+the bridge connects and at the start of each mission.
 
-The installed SSL 360 runtime has also been reverse-engineered far enough to
-prove direct display text, RGB565 drawing, and motor positioning. The isolated
-Bun probe currently requires SSL 360 to be paused because both transports need
-exclusive access to the same USB interface:
+UF8 orders use the labels printed beside the physical faders:
+`+12`, `+6`, `0`, `-5`, `-10`, `-20`, `-30`, `-40`, `-60`, and `-INF`.
+A task completes after the correct channel remains at its requested stop for
+450 ms.
+
+The standalone diagnostics require both Synthteam and SSL 360° to be stopped
+because the direct USB transport is exclusive:
 
 ```sh
 bun run probe:uf8 preview
@@ -125,24 +131,23 @@ bun run probe:uf8 preview
 
 `check` uses TypeScript 7 plus type-aware oxlint. The current tests cover
 two-and-three-device task generation, cross-routing, scoring, expiration,
-controller-specific progress, protocol validation, and Push note-grid mapping.
+controller-specific progress, direct UF8 framing and input decoding, protocol
+validation, and Push note-grid mapping.
 `probe:midi` asks macOS CoreMIDI for the exact input and output endpoints
 currently exposed to Chrome. `probe:uf8 preview` verifies direct UF8 packet
 generation without opening the controller.
 
 ## Current hardware gate
 
-The central laptop detects the connected Stream Deck XL and SSL UF8 over USB,
-and both vendor host applications are now installed. The Stream Deck plugin and
-UF8 MIDI-layer path have reached a first playable mission. Direct UF8 display
-and motor packets are implemented as an isolated probe but are not yet wired
-into the authoritative mission loop.
+The central laptop detects the connected Stream Deck XL and SSL UF8 over USB.
+The Stream Deck plugin and server-owned UF8 transport have both reached the
+authoritative mission loop. A live two-phone pass confirmed UF8 connection,
+native fader input, motor zeroing, custom strip labels, printed-dB targets, and
+task completion.
 
 The remaining physical gates are:
 
 - export and document a verified 32-key Stream Deck XL profile;
-- replace the UF8 Web MIDI bridge with the direct adapter once its input event
-  frames are decoded;
 - connect the Push, identify its generation, and tune its User-port LED
   palette;
 - complete one 90-second mission without using the development simulator.

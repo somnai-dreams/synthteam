@@ -149,7 +149,7 @@ describe("controller-specific tasks", () => {
       {
         kind: "uf8-fader",
         channel: task.channel,
-        value: task.target,
+        value: task.target.value,
       },
       2_000,
       dependencies,

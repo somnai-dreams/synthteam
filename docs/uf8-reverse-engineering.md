@@ -22,8 +22,9 @@ The connection defaults recovered from `SslConnection` are:
 - 2 ms FTDI latency timer;
 - receive and transmit queues purged after opening.
 
-SSL 360 owns this USB interface exclusively. It must be paused before the
-standalone probe can open the UF8, then restarted afterward.
+Only one process can own this USB interface. Synthteam now owns it for the
+duration of the server process, so SSL 360 must remain stopped. The standalone
+probe also requires the Synthteam server to be stopped.
 
 ## Serial frame
 
@@ -48,7 +49,7 @@ The UF8 creates eight display objects, indexed `0` through `7`. Each one is
 - 16-bit bitmap blocks;
 - higher-level graphic objects with updateable values.
 
-The MVP probe implements the first three. Text uses ASCII bytes. The built-in
+The game adapter and probe implement the first three. Text uses ASCII bytes. The built-in
 font IDs are:
 
 1. Serif Bold 14
@@ -83,6 +84,21 @@ The recovered range is `0` through `32767`. The standalone zeroing probe writes
 position zero to all eight faders, enables the motors for 650 ms, then disables
 them again.
 
+Native fader-position input uses code `33`:
+
+```text
+FADER_INDEX POSITION_U16_LE [CONTROL_TYPE]
+```
+
+Three-byte packets are fader events. In four-byte extended packets, control
+type `0` is a fader and `1` is an absolute encoder. The server rejects malformed
+indices and values, then normalizes the 15-bit position to the game engine's
+`0–100` range.
+
+Gameplay targets are structured printed-stop values rather than arbitrary
+percentages: `+12`, `+6`, `0`, `-5`, `-10`, `-20`, `-30`, `-40`, `-60`, and
+`-INF`. Their normalized positions follow the markings on the 100 mm throw.
+
 ## Reproduce
 
 Packet generation can be inspected without opening hardware:
@@ -91,7 +107,7 @@ Packet generation can be inspected without opening hardware:
 bun run probe:uf8 preview
 ```
 
-With SSL 360 paused:
+With SSL 360 and the Synthteam server stopped:
 
 ```sh
 bun run probe:uf8 list
@@ -110,6 +126,11 @@ controller traffic and reproduces SSL 360's command `27` flash-state tick every
 150 ms. That tick also services the UF8's runtime host watchdog. Closing the session
 returns the UF8 to its host-loss screen until SSL 360 reconnects.
 
-`bun:ffi` is experimental, so this adapter is currently a hardware validation
-surface rather than the production mission transport. Once input event decoding
-is recovered, a small native ABI shim is the likely durable replacement.
+The server uses this same session implementation as its authoritative UF8
+transport. It reconnects every two seconds if the device is unavailable,
+maintains the 150 ms watchdog tick, redraws the current mission after reconnect,
+and closes the D2XX handle on shutdown.
+
+`bun:ffi` is experimental. A small native ABI shim remains a possible hardening
+step if the direct FFI boundary proves unstable, but it is no longer required
+for the MVP.

@@ -11,11 +11,6 @@ export type MidiDeviceOption = {
   label: string;
 };
 
-type MidiCcBinding = {
-  midiChannel: number;
-  controller: number;
-};
-
 export type PushGridBinding = {
   midiChannel: number;
   bottomLeftNote: number;
@@ -24,17 +19,9 @@ export type PushGridBinding = {
 };
 
 type MidiConfiguration = {
-  uf8InputId: string | null;
-  uf8Faders: readonly (MidiCcBinding | null)[];
   pushInputId: string | null;
   pushOutputId: string | null;
   pushGrid: PushGridBinding | null;
-};
-
-type Uf8LearnState = {
-  kind: "uf8-bank";
-  nextChannel: number;
-  bindings: (MidiCcBinding | null)[];
 };
 
 type PushLearnState = {
@@ -43,7 +30,7 @@ type PushLearnState = {
   midiChannel: number | null;
 };
 
-type LearnState = Uf8LearnState | PushLearnState | null;
+type LearnState = PushLearnState | null;
 
 export type MidiBridgeView = {
   status: MidiStatus;
@@ -54,7 +41,7 @@ export type MidiBridgeView = {
   learnText: string;
 };
 
-const STORAGE_KEY = "synthteam-midi-v1";
+const STORAGE_KEY = "synthteam-push-midi-v1";
 
 export class MidiBridge {
   readonly #onHardwareEvent: (event: HardwareEvent) => void;
@@ -116,19 +103,6 @@ export class MidiBridge {
     this.#onChange();
   }
 
-  setUf8Input(id: string | null): void {
-    this.#configuration = {
-      ...this.#configuration,
-      uf8InputId: id,
-      uf8Faders:
-        id === this.#configuration.uf8InputId
-          ? this.#configuration.uf8Faders
-          : emptyFaderBindings(),
-    };
-    this.#learn = null;
-    this.#saveAndBind();
-  }
-
   setPushInput(id: string | null): void {
     this.#configuration = {
       ...this.#configuration,
@@ -150,21 +124,6 @@ export class MidiBridge {
     };
     this.#lastPushSignature = "";
     this.#save();
-    this.#onChange();
-  }
-
-  learnUf8Bank(): void {
-    if (this.#configuration.uf8InputId === null) {
-      this.#error = "Select the UF8 MIDI input first";
-      this.#onChange();
-      return;
-    }
-    this.#error = "";
-    this.#learn = {
-      kind: "uf8-bank",
-      nextChannel: 0,
-      bindings: [...emptyFaderBindings()],
-    };
     this.#onChange();
   }
 
@@ -224,10 +183,7 @@ export class MidiBridge {
     }
     for (const input of this.#access.inputs.values()) {
       input.onmidimessage = null;
-      if (
-        input.id === this.#configuration.uf8InputId ||
-        input.id === this.#configuration.pushInputId
-      ) {
+      if (input.id === this.#configuration.pushInputId) {
         input.onmidimessage = (event) => {
           if (event.data !== null) {
             this.#handleMessage(input.id, event.data);
@@ -248,39 +204,12 @@ export class MidiBridge {
     const midiChannel = status & 0x0f;
 
     if (
-      this.#learn?.kind === "uf8-bank" &&
-      inputId === this.#configuration.uf8InputId &&
-      messageKind === 0xb0
-    ) {
-      this.#learnUf8Control(midiChannel, data1);
-      return;
-    }
-    if (
       this.#learn?.kind === "push-grid" &&
       inputId === this.#configuration.pushInputId &&
       messageKind === 0x90 &&
       data2 > 0
     ) {
       this.#learnPushCorner(midiChannel, data1);
-      return;
-    }
-
-    if (
-      inputId === this.#configuration.uf8InputId &&
-      messageKind === 0xb0
-    ) {
-      const channel = this.#configuration.uf8Faders.findIndex(
-        (binding) =>
-          binding?.midiChannel === midiChannel &&
-          binding.controller === data1,
-      );
-      if (channel >= 0) {
-        this.#onHardwareEvent({
-          kind: "uf8-fader",
-          channel,
-          value: (data2 / 127) * 100,
-        });
-      }
       return;
     }
 
@@ -304,32 +233,6 @@ export class MidiBridge {
         velocity: data2,
       });
     }
-  }
-
-  #learnUf8Control(midiChannel: number, controller: number): void {
-    const learn = this.#learn;
-    if (learn?.kind !== "uf8-bank") {
-      return;
-    }
-    const alreadyCaptured = learn.bindings.some(
-      (binding) =>
-        binding?.midiChannel === midiChannel &&
-        binding.controller === controller,
-    );
-    if (alreadyCaptured) {
-      return;
-    }
-    learn.bindings[learn.nextChannel] = { midiChannel, controller };
-    learn.nextChannel += 1;
-    if (learn.nextChannel === 8) {
-      this.#configuration = {
-        ...this.#configuration,
-        uf8Faders: learn.bindings,
-      };
-      this.#learn = null;
-      this.#save();
-    }
-    this.#onChange();
   }
 
   #learnPushCorner(midiChannel: number, note: number): void {
@@ -393,8 +296,6 @@ export class MidiBridge {
     switch (this.#learn?.kind) {
       case undefined:
         return "";
-      case "uf8-bank":
-        return `Move UF8 fader ${this.#learn.nextChannel + 1} · ${this.#learn.nextChannel}/8 captured`;
       case "push-grid": {
         const instructions = [
           "Press the Push bottom-left pad",
@@ -470,14 +371,8 @@ export function pointForNote(
   return null;
 }
 
-function emptyFaderBindings(): readonly (MidiCcBinding | null)[] {
-  return [null, null, null, null, null, null, null, null];
-}
-
 function defaultConfiguration(): MidiConfiguration {
   return {
-    uf8InputId: null,
-    uf8Faders: emptyFaderBindings(),
     pushInputId: null,
     pushOutputId: null,
     pushGrid: null,
@@ -505,22 +400,9 @@ function isMidiConfiguration(value: unknown): value is MidiConfiguration {
     return false;
   }
   return (
-    isNullableString(value["uf8InputId"]) &&
-    Array.isArray(value["uf8Faders"]) &&
-    value["uf8Faders"].length === 8 &&
-    value["uf8Faders"].every(isNullableCcBinding) &&
     isNullableString(value["pushInputId"]) &&
     isNullableString(value["pushOutputId"]) &&
     isNullablePushGrid(value["pushGrid"])
-  );
-}
-
-function isNullableCcBinding(value: unknown): value is MidiCcBinding | null {
-  return (
-    value === null ||
-    (isRecord(value) &&
-      isInteger(value["midiChannel"], 0, 15) &&
-      isInteger(value["controller"], 0, 127))
   );
 }
 
