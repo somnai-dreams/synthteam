@@ -50,6 +50,21 @@ tolerance for 450 ms.
 
 ### Ableton Push
 
+Two ways to connect the Push:
+
+**Push 3 bridge (recommended for Push 3).** A dedicated hardware client under
+`hardware/push` connects straight to the server (like the Stream Deck plugin)
+and additionally drives the Push's screen: live vector path, progress, score,
+integrity, deadlines, and a HULL BREACH flash when the ship takes damage. No
+grid learning needed. See `hardware/push/README.md`:
+
+```sh
+cd hardware/push
+uv run bridge.py
+```
+
+**Web MIDI via the console (any Push generation).**
+
 1. Connect Push and enter User Mode.
 2. Enable MIDI in the Synthteam console.
 3. Select Push's User input and User output ports.

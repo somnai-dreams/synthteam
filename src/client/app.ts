@@ -543,6 +543,9 @@ function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
   const streamDeckStatus = consoleSnapshot.streamDeckConnected
     ? "CONNECTED"
     : "WAITING FOR PLUGIN";
+  const pushBridgeStatus = consoleSnapshot.pushBridgeConnected
+    ? "CONNECTED"
+    : "WEB MIDI OR BRIDGE";
   let midiContent = "";
   switch (view.status) {
     case "unsupported":
@@ -614,6 +617,9 @@ function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
         </div>
         <div class="deck-bridge-state ${consoleSnapshot.streamDeckConnected ? "is-connected" : ""}">
           <i></i><span>STREAM DECK</span><strong>${streamDeckStatus}</strong>
+        </div>
+        <div class="deck-bridge-state ${consoleSnapshot.pushBridgeConnected ? "is-connected" : ""}">
+          <i></i><span>PUSH BRIDGE</span><strong>${pushBridgeStatus}</strong>
         </div>
       </div>
       ${midiContent}

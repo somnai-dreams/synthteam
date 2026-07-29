@@ -12,6 +12,7 @@ import type {
   MissionOutcome,
   MissionState,
   MissionStations,
+  PushPathTask,
   Station,
   StreamDeckRouteTask,
 } from "../shared/domain.ts";
@@ -22,6 +23,7 @@ import type {
   ConsoleSnapshot,
   MissionPhaseView,
   PhoneSnapshot,
+  PushStateView,
   ServerMessage,
   ViewSnapshot,
 } from "../shared/protocol.ts";
@@ -34,7 +36,8 @@ type ViewerIdentity =
   | { kind: "anonymous" }
   | { kind: "phone"; crewId: string; station: Station }
   | { kind: "console" }
-  | { kind: "streamdeck" };
+  | { kind: "streamdeck" }
+  | { kind: "push-bridge" };
 
 type SocketData = {
   viewer: ViewerIdentity;
@@ -105,7 +108,7 @@ const server = Bun.serve<SocketData>({
         sockets.splice(socketIndex, 1);
       }
       const viewer = socket.data.viewer;
-      if (viewer.kind === "streamdeck") {
+      if (viewer.kind === "streamdeck" || viewer.kind === "push-bridge") {
         broadcastSnapshots();
         return;
       }
@@ -144,6 +147,10 @@ function handleMessage(
       return;
     case "streamdeck-join":
       socket.data.viewer = { kind: "streamdeck" };
+      broadcastSnapshots();
+      return;
+    case "push-join":
+      socket.data.viewer = { kind: "push-bridge" };
       broadcastSnapshots();
       return;
     case "phone-join":
@@ -313,6 +320,10 @@ function sendSnapshot(socket: Bun.ServerWebSocket<SocketData>): void {
     send(socket, { type: "streamdeck-state", state: streamDeckState() });
     return;
   }
+  if (socket.data.viewer.kind === "push-bridge") {
+    send(socket, { type: "push-state", state: pushState() });
+    return;
+  }
   send(socket, { type: "snapshot", snapshot: snapshotFor(socket.data.viewer) });
 }
 
@@ -323,7 +334,7 @@ function broadcastSnapshots(): void {
 }
 
 function snapshotFor(
-  viewer: Exclude<ViewerIdentity, { kind: "streamdeck" }>,
+  viewer: Exclude<ViewerIdentity, { kind: "streamdeck" | "push-bridge" }>,
 ): ViewSnapshot {
   const base = {
     crew,
@@ -332,6 +343,9 @@ function snapshotFor(
     phoneUrls,
     streamDeckConnected: sockets.some(
       (socket) => socket.data.viewer.kind === "streamdeck",
+    ),
+    pushBridgeConnected: sockets.some(
+      (socket) => socket.data.viewer.kind === "push-bridge",
     ),
   };
   switch (viewer.kind) {
@@ -379,6 +393,16 @@ function streamDeckState() {
   };
 }
 
+function pushState(): PushStateView {
+  if (game.kind !== "playing") {
+    return { phase: phaseView(), task: null };
+  }
+  const task = game.mission.tasks.find(
+    (candidate): candidate is PushPathTask => candidate.kind === "push-path",
+  );
+  return { phase: phaseView(), task: task ?? null };
+}
+
 function phaseView(): MissionPhaseView {
   switch (game.kind) {
     case "lobby":
@@ -422,6 +446,8 @@ function canSubmitHardware(
       return true;
     case "streamdeck":
       return eventKind === "streamdeck-key";
+    case "push-bridge":
+      return eventKind === "push-pad";
     case "anonymous":
     case "phone":
       send(socket, {

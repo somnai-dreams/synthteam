@@ -42,5 +42,8 @@ describe("client protocol", () => {
     expect(
       parseClientMessage(JSON.stringify({ type: "streamdeck-join" })),
     ).toEqual({ type: "streamdeck-join" });
+    expect(
+      parseClientMessage(JSON.stringify({ type: "push-join" })),
+    ).toEqual({ type: "push-join" });
   });
 });

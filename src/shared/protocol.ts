@@ -3,6 +3,7 @@ import type {
   CrewSlots,
   HardwareEvent,
   MissionState,
+  PushPathTask,
   Station,
   StreamDeckKey,
   StreamDeckRouteTask,
@@ -57,6 +58,7 @@ type SnapshotBase = {
   activity: readonly ActivityItem[];
   phoneUrls: readonly string[];
   streamDeckConnected: boolean;
+  pushBridgeConnected: boolean;
 };
 
 export type AnonymousSnapshot = SnapshotBase & {
@@ -90,6 +92,7 @@ export type ClientMessage =
     }
   | { type: "console-join" }
   | { type: "streamdeck-join" }
+  | { type: "push-join" }
   | { type: "start-mission" }
   | { type: "reset-mission" }
   | { type: "hardware-event"; event: HardwareEvent }
@@ -98,12 +101,18 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: "snapshot"; snapshot: ViewSnapshot }
   | { type: "streamdeck-state"; state: StreamDeckStateView }
+  | { type: "push-state"; state: PushStateView }
   | { type: "error"; message: string }
   | { type: "pong" };
 
 export type StreamDeckStateView = {
   keys: readonly StreamDeckKey[];
   task: StreamDeckRouteTask | null;
+};
+
+export type PushStateView = {
+  phase: MissionPhaseView;
+  task: PushPathTask | null;
 };
 
 export function publicOrderForReader(
@@ -128,6 +137,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
   switch (value.type) {
     case "console-join":
     case "streamdeck-join":
+    case "push-join":
     case "start-mission":
     case "reset-mission":
     case "ping":
@@ -171,6 +181,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         ? { type: "snapshot", snapshot: value.snapshot }
         : null;
     case "streamdeck-state":
+    case "push-state":
       return null;
     default:
       return null;
@@ -230,7 +241,8 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
     !isPhase(value.phase) ||
     !Array.isArray(value.activity) ||
     !isStringArray(value.phoneUrls) ||
-    typeof value.streamDeckConnected !== "boolean"
+    typeof value.streamDeckConnected !== "boolean" ||
+    typeof value.pushBridgeConnected !== "boolean"
   ) {
     return false;
   }
@@ -310,6 +322,7 @@ type JsonRecord = {
   activity?: unknown;
   phoneUrls?: unknown;
   streamDeckConnected?: unknown;
+  pushBridgeConnected?: unknown;
   order?: unknown;
   mission?: unknown;
   crewId?: unknown;
