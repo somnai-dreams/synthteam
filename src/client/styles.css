@@ -67,7 +67,6 @@ small {
 
 .eyebrow,
 .field-label,
-legend,
 .mission-meter span,
 .console-address span {
   color: var(--muted);
@@ -180,50 +179,66 @@ legend,
   box-shadow: 0 0 0 3px rgba(92, 225, 230, 0.12);
 }
 
-fieldset {
-  margin: 22px 0 0;
-  padding: 0;
-  border: 0;
-}
-
-legend {
-  margin-bottom: 9px;
-}
-
-.station-options {
-  display: grid;
-  gap: 8px;
-}
-
-.station-option {
-  position: relative;
-  display: grid;
-  min-height: 62px;
-  grid-template-columns: 14px 1fr;
-  grid-template-rows: auto auto;
-  column-gap: 12px;
-  align-content: center;
-  padding: 10px 14px;
-  border-radius: 12px;
+.assignment-preview {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 16px;
   background: #0a0f12;
   box-shadow: var(--shadow);
-  cursor: pointer;
-  transition-property: background-color, box-shadow, scale;
+}
+
+.assignment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.assignment-heading span,
+.assignment-heading strong {
+  font-family: ui-monospace, monospace;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+}
+
+.assignment-heading span {
+  color: var(--muted);
+}
+
+.assignment-heading strong {
+  color: var(--cyan);
+}
+
+.assignment-queue {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.assignment-slot {
+  display: grid;
+  min-width: 0;
+  min-height: 58px;
+  grid-template-columns: 10px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 7px;
+  align-content: center;
+  padding: 8px;
+  border-radius: 10px;
+  background: #11171b;
+  transition-property: background-color, box-shadow, opacity;
   transition-duration: 150ms;
 }
 
-.station-option:active {
-  scale: 0.96;
+.assignment-slot.is-next {
+  background: color-mix(in srgb, var(--station) 10%, #11171b);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--station) 58%, transparent);
 }
 
-.station-option:has(input:checked) {
-  background: color-mix(in srgb, var(--station) 10%, #0a0f12);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--station) 68%, transparent);
-}
-
-.station-option input {
-  position: absolute;
-  opacity: 0;
+.assignment-slot.is-occupied {
+  opacity: 0.42;
 }
 
 .station-indicator {
@@ -236,22 +251,31 @@ legend {
   box-shadow: 0 0 12px color-mix(in srgb, var(--station) 70%, transparent);
 }
 
-.station-option strong {
-  font-size: 0.95rem;
-  letter-spacing: 0.08em;
+.assignment-slot strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
 }
 
-.station-option small {
+.assignment-slot small {
   margin-top: 2px;
   color: var(--muted);
   font-family: ui-monospace, monospace;
-  font-size: 0.62rem;
+  font-size: 0.52rem;
   letter-spacing: 0.08em;
 }
 
-.station-option.is-taken {
-  cursor: not-allowed;
-  opacity: 0.42;
+.assignment-slot.is-next small {
+  color: var(--station);
+}
+
+.assignment-preview p {
+  margin-top: 10px;
+  color: #667178;
+  font-family: ui-monospace, monospace;
+  font-size: 0.58rem;
+  line-height: 1.45;
 }
 
 .primary-button {
@@ -666,6 +690,11 @@ legend {
   box-shadow: var(--shadow);
 }
 
+.console-station-card.is-next {
+  background: color-mix(in srgb, var(--station) 5%, var(--panel));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--station) 28%, transparent);
+}
+
 .console-station-card h2 {
   margin-top: 8px;
   font-size: 1.8rem;
@@ -712,6 +741,10 @@ legend {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   margin-top: 16px;
+}
+
+.task-overview.task-count-2 {
+  grid-template-columns: repeat(2, 1fr);
 }
 
 .task-card {
@@ -781,7 +814,7 @@ legend {
 
 .simulator-grid {
   display: grid;
-  grid-template-columns: 1.3fr 0.8fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
   margin-top: 14px;
 }

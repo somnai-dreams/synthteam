@@ -8,14 +8,12 @@ describe("client protocol", () => {
         JSON.stringify({
           type: "phone-join",
           name: "Mara",
-          station: "push",
           resumeCrewId: null,
         }),
       ),
     ).toEqual({
       type: "phone-join",
       name: "Mara",
-      station: "push",
       resumeCrewId: null,
     });
   });

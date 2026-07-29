@@ -1,6 +1,6 @@
 # Synthteam MVP
 
-Synthteam is a local, three-player coordination game built around three
+Synthteam is a local, two-or-three-player coordination game built around three
 different physical control surfaces. One laptop owns the hardware and runs the
 Bun server. Each player reads private orders on a phone and shouts them to the
 player standing at the controller that can complete them.
@@ -19,6 +19,10 @@ Phone: Push crew ─┘                 │
 Phones never submit control actions. During a mission, valid actions can only
 arrive through a hardware adapter or the explicitly labelled development
 simulator in the central console.
+
+Phones do not choose a station. The server assigns each new phone the first free
+controller in Deck → UF8 → Push order. Two players therefore get the connected
+Stream Deck and UF8 by default; the third adds Push.
 
 ## Controller-specific gameplay
 
@@ -44,9 +48,12 @@ button command.
 
 ## Mission rules
 
-- There is one phone/crew slot per controller.
+- There is one phone/crew slot per active controller.
+- A mission starts with either two or three connected phones.
+- The active stations form a routing cycle, so every reader always receives an
+  order for another crew member's controller.
 - Every phone receives an order for a different controller.
-- Three orders run concurrently during a 90-second mission.
+- Two or three orders run concurrently during a 90-second mission.
 - Completing an order scores points, raises the combo, and repairs a small
   amount of integrity.
 - A wrong discrete action costs a little integrity and resets that task's
@@ -56,9 +63,9 @@ button command.
 
 ## MVP gate
 
-The MVP is proven when three players can join from phones and complete a
-90-second mission using the three physical devices without touching the central
-laptop after launch.
+The MVP is proven when either two or three players can join from phones and
+complete a 90-second mission using only their assigned physical devices without
+touching the central laptop after launch.
 
 ## Adapter boundary
 

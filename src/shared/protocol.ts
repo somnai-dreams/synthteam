@@ -86,7 +86,6 @@ export type ClientMessage =
   | {
       type: "phone-join";
       name: string;
-      station: Station;
       resumeCrewId: string | null;
     }
   | { type: "console-join" }
@@ -136,7 +135,6 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "phone-join": {
       if (
         typeof value.name !== "string" ||
-        !isStation(value.station) ||
         !isNullableString(value.resumeCrewId)
       ) {
         return null;
@@ -144,7 +142,6 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return {
         type: "phone-join",
         name: value.name,
-        station: value.station,
         resumeCrewId: value.resumeCrewId,
       };
     }

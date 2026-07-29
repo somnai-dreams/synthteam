@@ -11,6 +11,7 @@ import type {
   HardwareEvent,
   MissionOutcome,
   MissionState,
+  MissionStations,
   Station,
   StreamDeckRouteTask,
 } from "../shared/domain.ts";
@@ -41,7 +42,7 @@ type SocketData = {
 
 type GameState =
   | { kind: "lobby" }
-  | { kind: "countdown"; endsAt: number }
+  | { kind: "countdown"; endsAt: number; stations: MissionStations }
   | { kind: "playing"; mission: MissionState }
   | {
       kind: "game-over";
@@ -146,7 +147,7 @@ function handleMessage(
       broadcastSnapshots();
       return;
     case "phone-join":
-      joinPhone(socket, message.name, message.station, message.resumeCrewId);
+      joinPhone(socket, message.name, message.resumeCrewId);
       return;
     case "start-mission":
       if (requireConsole(socket) && game.kind === "lobby") {
@@ -178,7 +179,6 @@ function handleMessage(
 function joinPhone(
   socket: Bun.ServerWebSocket<SocketData>,
   rawName: string,
-  station: Station,
   resumeCrewId: string | null,
 ): void {
   const name = normalizeName(rawName);
@@ -187,26 +187,23 @@ function joinPhone(
     return;
   }
 
-  const existing = crew[station];
-  if (existing !== null && existing.id === resumeCrewId) {
+  const resumedStation = stationForCrewId(resumeCrewId);
+  if (resumedStation !== null) {
+    const existing = crew[resumedStation];
+    if (existing === null) {
+      throw new Error("Resumed crew station lost its member");
+    }
     existing.connected = true;
     socket.data.viewer = {
       kind: "phone",
       crewId: existing.id,
-      station,
+      station: resumedStation,
     };
     addActivity(
-      `${existing.name} reconnected to ${stationName(station)}`,
+      `${existing.name} reconnected to ${stationName(resumedStation)}`,
       "success",
     );
     broadcastSnapshots();
-    return;
-  }
-  if (existing !== null && existing.connected) {
-    send(socket, {
-      type: "error",
-      message: `${stationName(station)} already has an operator`,
-    });
     return;
   }
   if (game.kind !== "lobby") {
@@ -217,6 +214,11 @@ function joinPhone(
     return;
   }
 
+  const station = firstFreeStation();
+  if (station === null) {
+    send(socket, { type: "error", message: "All three stations are occupied" });
+    return;
+  }
   const member: CrewMember = {
     id: crypto.randomUUID(),
     name,
@@ -225,21 +227,21 @@ function joinPhone(
   };
   crew[station] = member;
   socket.data.viewer = { kind: "phone", crewId: member.id, station };
-  addActivity(`${name} claimed ${stationName(station)}`, "success");
+  addActivity(`${name} assigned to ${stationName(station)}`, "success");
   broadcastSnapshots();
 }
 
 function startCountdown(socket: Bun.ServerWebSocket<SocketData>): void {
-  const missing = STATIONS.filter((station) => crew[station]?.connected !== true);
-  if (missing.length > 0) {
+  const stations = connectedMissionStations();
+  if (stations === null) {
     send(socket, {
       type: "error",
-      message: `Waiting for ${missing.map(stationName).join(", ")}`,
+      message: "Waiting for at least two phones",
     });
     return;
   }
-  game = { kind: "countdown", endsAt: Date.now() + 3_000 };
-  addActivity("Mission begins in three", "neutral");
+  game = { kind: "countdown", endsAt: Date.now() + 3_000, stations };
+  addActivity(`${stations.length}-crew mission begins in three`, "neutral");
   broadcastSnapshots();
 }
 
@@ -251,7 +253,10 @@ function tick(): void {
       return;
     case "countdown":
       if (now >= game.endsAt) {
-        game = { kind: "playing", mission: createMission(now) };
+        game = {
+          kind: "playing",
+          mission: createMission(now, game.stations),
+        };
         addActivity("All systems live", "success");
         broadcastSnapshots();
       }
@@ -368,12 +373,9 @@ function streamDeckState() {
     (candidate): candidate is StreamDeckRouteTask =>
       candidate.kind === "streamdeck-route",
   );
-  if (task === undefined) {
-    throw new Error("Playing mission has no Stream Deck task");
-  }
   return {
     keys: game.mission.streamDeckKeys,
-    task,
+    task: task ?? null,
   };
 }
 
@@ -491,4 +493,38 @@ function findPhoneUrls(serverPort: number): readonly string[] {
     }
   }
   return urls.length > 0 ? urls : [`http://localhost:${serverPort}`];
+}
+
+function stationForCrewId(crewId: string | null): Station | null {
+  if (crewId === null) {
+    return null;
+  }
+  for (const station of STATIONS) {
+    if (crew[station]?.id === crewId) {
+      return station;
+    }
+  }
+  return null;
+}
+
+function firstFreeStation(): Station | null {
+  for (const station of STATIONS) {
+    if (crew[station]?.connected !== true) {
+      return station;
+    }
+  }
+  return null;
+}
+
+function connectedMissionStations(): MissionStations | null {
+  const connected = STATIONS.filter(
+    (station) => crew[station]?.connected === true,
+  );
+  const first = connected[0];
+  const second = connected[1];
+  if (first === undefined || second === undefined) {
+    return null;
+  }
+  const third = connected[2];
+  return third === undefined ? [first, second] : [first, second, third];
 }

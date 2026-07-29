@@ -4,13 +4,14 @@ import type {
   HardwareEvent,
   MissionOutcome,
   MissionState,
+  MissionStations,
   MissionUpdate,
   PushPathColor,
   Station,
   StreamDeckKey,
   StreamDeckKeyColor,
 } from "../shared/domain.ts";
-import { stationForTask } from "../shared/domain.ts";
+import { STATIONS, stationForTask } from "../shared/domain.ts";
 
 const MISSION_DURATION_MS = 90_000;
 const TASK_DURATION_MS = 13_000;
@@ -86,15 +87,18 @@ export type MissionDependencies = {
 
 export function createMission(
   now: number,
+  stations: MissionStations = STATIONS,
   dependencies: MissionDependencies = {
     random: Math.random,
     makeId: () => crypto.randomUUID(),
   },
 ): MissionState {
+  assertUniqueStations(stations);
   const streamDeckKeys = createStreamDeckLayout();
   const mission: MissionState = {
     startedAt: now,
     endsAt: now + MISSION_DURATION_MS,
+    stations,
     score: 0,
     integrity: 100,
     combo: 0,
@@ -102,8 +106,13 @@ export function createMission(
     streamDeckKeys,
   };
 
-  for (const reader of readerStations()) {
-    mission.tasks.push(createTaskForReader(reader, now, dependencies));
+  for (let index = 0; index < stations.length; index += 1) {
+    const reader = stations[index];
+    const target = stations[(index + 1) % stations.length];
+    if (reader === undefined || target === undefined) {
+      throw new Error("Mission route is missing a station");
+    }
+    mission.tasks.push(createTaskForRoute(reader, target, now, dependencies));
   }
 
   return mission;
@@ -127,7 +136,7 @@ export function applyHardwareEvent(
   );
   const task = mission.tasks[taskIndex];
   if (task === undefined) {
-    throw new Error(`Missing task for hardware event ${event.kind}`);
+    return { outcomes: [] };
   }
 
   const result = applyEventToTask(task, event, now);
@@ -201,10 +210,6 @@ export function advanceMission(
   return { outcomes };
 }
 
-function readerStations(): readonly Station[] {
-  return ["streamdeck", "uf8", "push"];
-}
-
 function createStreamDeckLayout(): readonly StreamDeckKey[] {
   return STREAM_DECK_LABELS.map((label, index) => ({
     index,
@@ -213,12 +218,12 @@ function createStreamDeckLayout(): readonly StreamDeckKey[] {
   }));
 }
 
-function createTaskForReader(
+function createTaskForRoute(
   reader: Station,
+  target: Station,
   now: number,
   dependencies: MissionDependencies,
 ): ActiveTask {
-  const target = targetForReader(reader);
   switch (target) {
     case "streamdeck":
       return createStreamDeckTask(reader, now, dependencies);
@@ -226,17 +231,6 @@ function createTaskForReader(
       return createUf8Task(reader, now, dependencies);
     case "push":
       return createPushTask(reader, now, dependencies);
-  }
-}
-
-function targetForReader(reader: Station): Station {
-  switch (reader) {
-    case "streamdeck":
-      return "uf8";
-    case "uf8":
-      return "push";
-    case "push":
-      return "streamdeck";
   }
 }
 
@@ -427,8 +421,9 @@ function completeTaskAt(
   mission.score += points;
   mission.combo += 1;
   mission.integrity = Math.min(100, mission.integrity + COMPLETION_REPAIR);
-  mission.tasks[taskIndex] = createTaskForReader(
+  mission.tasks[taskIndex] = createTaskForRoute(
     completed.reader,
+    stationForTask(completed),
     now,
     dependencies,
   );
@@ -457,8 +452,9 @@ function expireTaskAt(
   }
   mission.integrity = Math.max(0, mission.integrity - EXPIRED_TASK_DAMAGE);
   mission.combo = 0;
-  mission.tasks[taskIndex] = createTaskForReader(
+  mission.tasks[taskIndex] = createTaskForRoute(
     expired.reader,
+    stationForTask(expired),
     now,
     dependencies,
   );
@@ -472,4 +468,14 @@ function expireTaskAt(
 
 function randomInteger(random: () => number, minimum: number, maximum: number) {
   return Math.floor(random() * (maximum - minimum + 1)) + minimum;
+}
+
+function assertUniqueStations(stations: MissionStations): void {
+  if (
+    stations[0] === stations[1] ||
+    (stations.length === 3 &&
+      (stations[0] === stations[2] || stations[1] === stations[2]))
+  ) {
+    throw new Error("Mission stations must be unique");
+  }
 }

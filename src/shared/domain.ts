@@ -2,6 +2,10 @@ export const STATIONS = ["streamdeck", "uf8", "push"] as const;
 
 export type Station = (typeof STATIONS)[number];
 
+export type MissionStations =
+  | readonly [Station, Station]
+  | readonly [Station, Station, Station];
+
 export type CrewMember = {
   id: string;
   name: string;
@@ -89,6 +93,7 @@ export type HardwareEvent =
 export type MissionState = {
   startedAt: number;
   endsAt: number;
+  stations: MissionStations;
   score: number;
   integrity: number;
   combo: number;

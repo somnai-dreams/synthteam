@@ -1,11 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type {
   ActiveTask,
+  MissionStations,
   PushPathTask,
   StreamDeckRouteTask,
   Uf8FaderTask,
 } from "../shared/domain.ts";
-import { stationForTask, taskForReader } from "../shared/domain.ts";
+import {
+  STATIONS,
+  stationForTask,
+  taskForReader,
+} from "../shared/domain.ts";
 import {
   advanceMission,
   applyHardwareEvent,
@@ -40,7 +45,7 @@ function taskOfKind<T extends ActiveTask["kind"]>(
 
 describe("mission creation", () => {
   test("creates one cross-routed task per reader", () => {
-    const mission = createMission(1_000, deterministicDependencies());
+    const mission = createMission(1_000, STATIONS, deterministicDependencies());
 
     expect(mission.tasks).toHaveLength(3);
     for (const reader of ["streamdeck", "uf8", "push"] as const) {
@@ -48,8 +53,47 @@ describe("mission creation", () => {
     }
   });
 
+  test("cross-routes exactly two selected controller stations", () => {
+    const stations: MissionStations = ["streamdeck", "uf8"];
+    const mission = createMission(
+      1_000,
+      stations,
+      deterministicDependencies(),
+    );
+
+    expect(mission.stations).toEqual(stations);
+    expect(mission.tasks).toHaveLength(2);
+    expect(stationForTask(taskForReader(mission, "streamdeck"))).toBe("uf8");
+    expect(stationForTask(taskForReader(mission, "uf8"))).toBe("streamdeck");
+    expect(mission.tasks.some((task) => task.reader === "push")).toBe(false);
+  });
+
+  test("ignores input from a controller outside the two-crew mission", () => {
+    const dependencies = deterministicDependencies();
+    const mission = createMission(
+      1_000,
+      ["streamdeck", "uf8"],
+      dependencies,
+    );
+
+    const update = applyHardwareEvent(
+      mission,
+      {
+        kind: "push-pad",
+        point: { x: 2, y: 2 },
+        phase: "down",
+        velocity: 100,
+      },
+      2_000,
+      dependencies,
+    );
+
+    expect(update.outcomes).toEqual([]);
+    expect(mission.integrity).toBe(100);
+  });
+
   test("creates a complete 8 by 4 Stream Deck layout", () => {
-    const mission = createMission(1_000, deterministicDependencies());
+    const mission = createMission(1_000, STATIONS, deterministicDependencies());
 
     expect(mission.streamDeckKeys).toHaveLength(32);
     expect(new Set(mission.streamDeckKeys.map((key) => key.label)).size).toBe(
@@ -61,7 +105,7 @@ describe("mission creation", () => {
 describe("controller-specific tasks", () => {
   test("completes a Stream Deck route in source-destination order", () => {
     const dependencies = deterministicDependencies();
-    const mission = createMission(1_000, dependencies);
+    const mission = createMission(1_000, STATIONS, dependencies);
     const task = taskOfKind(
       mission.tasks,
       "streamdeck-route",
@@ -97,7 +141,7 @@ describe("controller-specific tasks", () => {
 
   test("requires a UF8 fader to remain in tolerance", () => {
     const dependencies = deterministicDependencies();
-    const mission = createMission(1_000, dependencies);
+    const mission = createMission(1_000, STATIONS, dependencies);
     const task = taskOfKind(mission.tasks, "uf8-fader") as Uf8FaderTask;
 
     applyHardwareEvent(
@@ -119,7 +163,7 @@ describe("controller-specific tasks", () => {
 
   test("completes a Push path in spatial order", () => {
     const dependencies = deterministicDependencies();
-    const mission = createMission(1_000, dependencies);
+    const mission = createMission(1_000, STATIONS, dependencies);
     const task = taskOfKind(mission.tasks, "push-path") as PushPathTask;
 
     for (const [index, point] of task.path.entries()) {
@@ -141,7 +185,7 @@ describe("controller-specific tasks", () => {
 describe("mission pressure", () => {
   test("damages integrity and replaces expired orders", () => {
     const dependencies = deterministicDependencies();
-    const mission = createMission(1_000, dependencies);
+    const mission = createMission(1_000, STATIONS, dependencies);
     const oldIds = mission.tasks.map((task) => task.id);
 
     const update = advanceMission(mission, 15_000, dependencies);

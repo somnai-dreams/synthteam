@@ -1,16 +1,18 @@
 # Synthteam
 
-Synthteam is a three-player, local-network coordination game built around real
-control surfaces:
+Synthteam is a two-or-three-player local-network coordination game built around
+real control surfaces:
 
 - a 32-key Stream Deck XL for routing;
 - an SSL UF8 for continuous reactor levels;
 - an Ableton Push for spatial navigation paths.
 
-All hardware connects to one central laptop. Every player joins from a phone,
-receives an order for somebody else's controller, and has to shout it across
-the room. The Bun server owns the mission state and only accepts game actions
-from the physical device bridge or the clearly labelled development simulator.
+All hardware connects to one central laptop. Every player joins from a phone
+and is automatically assigned the first free controller in Deck → UF8 → Push
+order. They receive instructions for somebody else's controller and have to
+shout them across the room. The Bun server owns the mission state and only
+accepts game actions from the physical device bridge or the clearly labelled
+development simulator.
 
 ## Start the MVP
 
@@ -27,9 +29,10 @@ bun start
 
 Open `http://localhost:4179/console` in Chrome on the central laptop. The
 console prints and displays its available LAN addresses. Open one of those
-addresses on each phone, then claim the Deck, UF8, and Push crew slots.
+addresses on each phone and enter a call sign.
 
-The mission can start when all three phones are connected.
+The mission can start with two phones. A third phone automatically adds Push to
+the routing cycle when it joins before launch.
 
 ## Connect the hardware
 
@@ -73,8 +76,9 @@ See `hardware/streamdeck/README.md` for the current profile limitation.
 
 ## Development simulator
 
-The central console includes an explicit simulator for all three event types.
-It is useful for tests and UI work when the controllers are not attached.
+The central console includes an explicit simulator for every controller active
+in the current mission. It is useful for tests and UI work when the controllers
+are not attached.
 It is not intended for a production mission—the MVP gate requires completing
 the mission without touching the central laptop after launch.
 
@@ -87,10 +91,11 @@ bun run build
 bun run probe:midi
 ```
 
-`check` uses TypeScript 7 plus type-aware oxlint. The current tests cover task
-generation, cross-routing, scoring, expiration, controller-specific progress,
-protocol validation, and Push note-grid mapping. `probe:midi` asks macOS
-CoreMIDI for the exact input and output endpoints currently exposed to Chrome.
+`check` uses TypeScript 7 plus type-aware oxlint. The current tests cover
+two-and-three-device task generation, cross-routing, scoring, expiration,
+controller-specific progress, protocol validation, and Push note-grid mapping.
+`probe:midi` asks macOS CoreMIDI for the exact input and output endpoints
+currently exposed to Chrome.
 
 ## Current hardware gate
 

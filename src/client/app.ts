@@ -19,7 +19,6 @@ import { MidiBridge, type MidiDeviceOption } from "./midi.ts";
 type SavedCrew = {
   crewId: string;
   name: string;
-  station: Station;
 };
 
 const appElement = document.querySelector<HTMLDivElement>("#app");
@@ -35,7 +34,6 @@ let snapshot: ViewSnapshot | null = null;
 let errorMessage = "";
 let savedCrew = loadSavedCrew();
 let joinDraftName = "";
-let joinDraftStation: Station | null = null;
 
 connect();
 setInterval(updateLiveNumbers, 100);
@@ -52,7 +50,6 @@ function connect(): void {
       send({
         type: "phone-join",
         name: savedCrew.name,
-        station: savedCrew.station,
         resumeCrewId: savedCrew.crewId,
       });
     }
@@ -82,7 +79,6 @@ function connect(): void {
             savedCrew = {
               crewId: snapshot.viewer.crewId,
               name: member.name,
-              station: snapshot.viewer.station,
             };
             saveCrew(savedCrew);
           }
@@ -110,13 +106,6 @@ function render(): void {
 
 function renderPhone(): void {
   if (snapshot === null || snapshot.viewer.kind === "anonymous") {
-    if (
-      snapshot?.viewer.kind === "anonymous" &&
-      joinDraftStation !== null &&
-      snapshot.crew[joinDraftStation]?.connected === true
-    ) {
-      joinDraftStation = null;
-    }
     app.innerHTML = phoneJoinMarkup();
     bindPhoneJoin();
     return;
@@ -129,41 +118,49 @@ function renderPhone(): void {
 
 function phoneJoinMarkup(): string {
   const crew = snapshot?.crew ?? emptyCrew();
+  const nextStation = firstFreeCrewStation(crew);
   return `
     <main class="join-screen">
       <header class="brand-block stagger-1">
         <div class="eyebrow">COOPERATIVE HARDWARE PANIC</div>
         <h1>SYNTH<span>/</span>TEAM</h1>
-        <p>Claim a station. Read the order. Shout it to the crew member who has the right machine.</p>
+        <p>Join the crew. Synthteam assigns the first free control surface, then routes your orders to somebody else.</p>
       </header>
       <form id="join-form" class="join-card stagger-2">
         <label class="field-label" for="crew-name">CALL SIGN</label>
         <input id="crew-name" name="name" maxlength="18" autocomplete="nickname" placeholder="Enter your name" value="${escapeHtml(joinDraftName)}" required />
-        <fieldset>
-          <legend>YOUR STATION</legend>
-          <div class="station-options">
-            ${STATIONS.map((station) => stationOption(station, crew)).join("")}
+        <section class="assignment-preview">
+          <div class="assignment-heading">
+            <span>AUTOMATIC DEVICE ASSIGNMENT</span>
+            <strong>${nextStation === null ? "CREW FULL" : `${stationShortName(nextStation)} NEXT`}</strong>
           </div>
-        </fieldset>
+          <div class="assignment-queue">
+            ${STATIONS.map((station) => assignmentSlot(station, crew, nextStation)).join("")}
+          </div>
+          <p>Priority: Stream Deck, UF8, then Push. Two phones are enough to launch.</p>
+        </section>
         ${errorMarkup()}
-        <button class="primary-button" type="submit">CLAIM STATION <span>→</span></button>
+        <button class="primary-button" type="submit" ${nextStation === null ? "disabled" : ""}>JOIN CREW <span>→</span></button>
       </form>
       <p class="join-note stagger-3">Your phone only shows orders. Actions must happen on the physical controls.</p>
     </main>
   `;
 }
 
-function stationOption(station: Station, crew: CrewSlots): string {
+function assignmentSlot(
+  station: Station,
+  crew: CrewSlots,
+  nextStation: Station | null,
+): string {
   const member = crew[station];
-  const disabled = member?.connected === true;
-  const checked = joinDraftStation === station && !disabled;
+  const occupied = member?.connected === true;
+  const isNext = station === nextStation;
   return `
-    <label class="station-option station-${station} ${disabled ? "is-taken" : ""}">
-      <input type="radio" name="station" value="${station}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} required />
+    <div class="assignment-slot station-${station} ${occupied ? "is-occupied" : ""} ${isNext ? "is-next" : ""}">
       <span class="station-indicator"></span>
       <strong>${stationShortName(station)}</strong>
-      <small>${disabled ? `HELD BY ${escapeHtml(member.name)}` : stationRole(station)}</small>
-    </label>
+      <small>${occupied ? "IN USE" : isNext ? "NEXT" : "OPEN"}</small>
+    </div>
   `;
 }
 
@@ -173,30 +170,18 @@ function bindPhoneJoin(): void {
   nameInput?.addEventListener("input", () => {
     joinDraftName = nameInput.value;
   });
-  for (const input of document.querySelectorAll<HTMLInputElement>(
-    'input[name="station"]',
-  )) {
-    input.addEventListener("change", () => {
-      if (isStation(input.value)) {
-        joinDraftStation = input.value;
-      }
-    });
-  }
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const name = data.get("name");
-    const station = data.get("station");
-    if (typeof name !== "string" || !isStation(station)) {
+    if (typeof name !== "string") {
       return;
     }
     joinDraftName = name;
-    joinDraftStation = station;
-    savedCrew = { crewId: "", name, station };
+    savedCrew = { crewId: "", name };
     send({
       type: "phone-join",
       name,
-      station,
       resumeCrewId: null,
     });
   });
@@ -228,12 +213,17 @@ function phoneShellMarkup(phone: PhoneSnapshot): string {
 function phonePhaseMarkup(phone: PhoneSnapshot): string {
   switch (phone.phase.kind) {
     case "lobby":
+      const connectedCount = connectedCrewCount(phone.crew);
       return `
         <section class="waiting-state">
           <div class="scope-mark"><i></i><i></i><i></i></div>
           <div class="eyebrow">STATION CLAIMED</div>
           <h2>Waiting for the crew</h2>
-          <p>Keep this screen awake. The central console starts the mission when all three stations report in.</p>
+          <p>${
+            connectedCount >= 2
+              ? `${connectedCount} crew linked. The central console can launch now.`
+              : "One more phone is needed. The third crew member is optional."
+          }</p>
         </section>
       `;
     case "countdown":
@@ -315,13 +305,16 @@ function consoleMarkup(consoleSnapshot: ConsoleSnapshot): string {
 function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
   switch (consoleSnapshot.phase.kind) {
     case "lobby":
+      const connectedCount = connectedCrewCount(consoleSnapshot.crew);
+      const ready = connectedCount >= 2;
+      const nextStation = firstFreeCrewStation(consoleSnapshot.crew);
       return `
         <section class="console-lobby">
           <div class="lobby-stations">
-            ${STATIONS.map((station) => consoleStationCard(station, consoleSnapshot.crew)).join("")}
+            ${STATIONS.map((station) => consoleStationCard(station, consoleSnapshot.crew, nextStation)).join("")}
           </div>
-          <button id="start-mission" class="primary-button console-start" ${crewReady(consoleSnapshot.crew) ? "" : "disabled"}>
-            ${crewReady(consoleSnapshot.crew) ? "START MISSION" : "WAITING FOR 3 PHONES"}
+          <button id="start-mission" class="primary-button console-start" ${ready ? "" : "disabled"}>
+            ${lobbyStartLabel(connectedCount)}
             <span>▶</span>
           </button>
         </section>
@@ -340,7 +333,7 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
       return `
         <section class="console-mission">
           ${missionMeterMarkup(consoleSnapshot.phase)}
-          <div class="task-overview">
+          <div class="task-overview task-count-${consoleSnapshot.mission.tasks.length}">
             ${consoleSnapshot.mission.tasks.map((task) => taskCard(task, consoleSnapshot)).join("")}
           </div>
           <div class="simulator">
@@ -370,15 +363,21 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
   }
 }
 
-function consoleStationCard(station: Station, crew: CrewSlots): string {
+function consoleStationCard(
+  station: Station,
+  crew: CrewSlots,
+  nextStation: Station | null,
+): string {
   const member = crew[station];
+  const connected = member?.connected === true;
+  const isNext = station === nextStation;
   return `
-    <article class="console-station-card station-${station}">
+    <article class="console-station-card station-${station} ${isNext ? "is-next" : ""}">
       <span class="station-indicator"></span>
       <div>
         <div class="eyebrow">${stationShortName(station)}</div>
-        <h2>${member === null ? "Unclaimed" : escapeHtml(member.name)}</h2>
-        <p>${member?.connected === true ? "PHONE LINKED" : stationRole(station)}</p>
+        <h2>${connected ? escapeHtml(member.name) : "Unclaimed"}</h2>
+        <p>${connected ? "PHONE LINKED" : isNext ? "AUTO-ASSIGN NEXT" : stationRole(station)}</p>
       </div>
     </article>
   `;
@@ -403,6 +402,9 @@ function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
     return "";
   }
   const active = taskByKind(consoleSnapshot.mission.tasks, "streamdeck-route");
+  if (active === null) {
+    return "";
+  }
   return `
     <section class="sim-panel deck-panel">
       <header><span>01</span><strong>STREAM DECK</strong></header>
@@ -431,6 +433,9 @@ function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
     return "";
   }
   const active = taskByKind(consoleSnapshot.mission.tasks, "uf8-fader");
+  if (active === null) {
+    return "";
+  }
   return `
     <section class="sim-panel uf8-panel">
       <header><span>02</span><strong>SSL UF8</strong></header>
@@ -455,6 +460,9 @@ function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
     return "";
   }
   const active = taskByKind(consoleSnapshot.mission.tasks, "push-path");
+  if (active === null) {
+    return "";
+  }
   return `
     <section class="sim-panel push-panel">
       <header><span>03</span><strong>ABLETON PUSH</strong></header>
@@ -718,11 +726,12 @@ function activityMarkup(consoleSnapshot: ConsoleSnapshot): string {
 
 function crewChip(station: Station, crew: CrewSlots): string {
   const member = crew[station];
+  const connected = member?.connected === true;
   return `
-    <div class="crew-chip ${member?.connected === true ? "is-online" : ""}">
+    <div class="crew-chip ${connected ? "is-online" : ""}">
       <i></i>
       <span>${stationShortName(station)}</span>
-      <strong>${member === null ? "—" : escapeHtml(member.name)}</strong>
+      <strong>${connected ? escapeHtml(member.name) : "—"}</strong>
     </div>
   `;
 }
@@ -761,15 +770,12 @@ function taskProgress(task: ActiveTask): string {
 function taskByKind<T extends ActiveTask["kind"]>(
   tasks: readonly ActiveTask[],
   kind: T,
-): Extract<ActiveTask, { kind: T }> {
+): Extract<ActiveTask, { kind: T }> | null {
   const task = tasks.find(
     (candidate): candidate is Extract<ActiveTask, { kind: T }> =>
       candidate.kind === kind,
   );
-  if (task === undefined) {
-    throw new Error(`Missing ${kind} task`);
-  }
-  return task;
+  return task ?? null;
 }
 
 function updateLiveNumbers(): void {
@@ -812,15 +818,12 @@ function loadSavedCrew(): SavedCrew | null {
       value !== null &&
       "crewId" in value &&
       "name" in value &&
-      "station" in value &&
       typeof value.crewId === "string" &&
-      typeof value.name === "string" &&
-      isStation(value.station)
+      typeof value.name === "string"
     ) {
       return {
         crewId: value.crewId,
         name: value.name,
-        station: value.station,
       };
     }
   } catch {
@@ -837,8 +840,32 @@ function emptyCrew(): CrewSlots {
   return { streamdeck: null, uf8: null, push: null };
 }
 
-function crewReady(crew: CrewSlots): boolean {
-  return STATIONS.every((station) => crew[station]?.connected === true);
+function connectedCrewCount(crew: CrewSlots): number {
+  return STATIONS.filter((station) => crew[station]?.connected === true).length;
+}
+
+function firstFreeCrewStation(crew: CrewSlots): Station | null {
+  for (const station of STATIONS) {
+    if (crew[station]?.connected !== true) {
+      return station;
+    }
+  }
+  return null;
+}
+
+function lobbyStartLabel(connectedCount: number): string {
+  switch (connectedCount) {
+    case 0:
+      return "WAITING FOR 2 PHONES";
+    case 1:
+      return "WAITING FOR 1 PHONE";
+    case 2:
+      return "START 2-CREW MISSION";
+    case 3:
+      return "START 3-CREW MISSION";
+    default:
+      throw new Error(`Unexpected crew count: ${connectedCount}`);
+  }
 }
 
 function gridPoints(): GridPoint[] {
@@ -849,10 +876,6 @@ function gridPoints(): GridPoint[] {
     }
   }
   return points;
-}
-
-function isStation(value: unknown): value is Station {
-  return STATIONS.some((station) => station === value);
 }
 
 function isPhoneSnapshot(value: ViewSnapshot): value is PhoneSnapshot {
