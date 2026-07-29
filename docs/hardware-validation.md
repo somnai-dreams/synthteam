@@ -41,3 +41,21 @@ system_profiler SPUSBDataType -detailLevel mini
 
 The next pass should record the visible MIDI endpoint names, learned UF8 CC
 bindings, Push grid corner notes, and a full physical mission result.
+
+## 2026-07-28 · UF8 runtime protocol pass
+
+SSL 360 `2.0.6.67265` is now installed and the UF8 is claimed by its background
+core. Inspection of the locally installed runtime established:
+
+- the direct D2XX USB connection settings and packet framing;
+- eight independent `128 × 160` RGB565 display surfaces;
+- built-in commands for text, filled boxes, bitmap blocks, and graphic objects;
+- motor position and enable commands for all eight faders.
+
+Synthteam now has a Bun probe that can generate the recovered packets, draw a
+colour-coded label test, and move all faders to zero. Direct hardware execution
+requires pausing SSL 360 because its core owns the same USB interface
+exclusively.
+
+See [`uf8-reverse-engineering.md`](./uf8-reverse-engineering.md) for the exact
+evidence boundary and reproduction commands.

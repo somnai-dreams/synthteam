@@ -48,6 +48,21 @@ The mapping is validated and stored in the central browser's local storage.
 A fader task completes after the correct channel remains within its target
 tolerance for 450 ms.
 
+The installed SSL 360 runtime has also been reverse-engineered far enough to
+prove direct display text, RGB565 drawing, and motor positioning. The isolated
+Bun probe currently requires SSL 360 to be paused because both transports need
+exclusive access to the same USB interface:
+
+```sh
+bun run probe:uf8 preview
+bun run probe:uf8 list
+bun run probe:uf8 display-test
+bun run probe:uf8 zero-faders
+```
+
+See [`docs/uf8-reverse-engineering.md`](docs/uf8-reverse-engineering.md) for the
+confirmed packet format and safety boundary.
+
 ### Ableton Push
 
 1. Connect Push and enter User Mode.
@@ -89,28 +104,29 @@ bun test
 bun run check
 bun run build
 bun run probe:midi
+bun run probe:uf8 preview
 ```
 
 `check` uses TypeScript 7 plus type-aware oxlint. The current tests cover
 two-and-three-device task generation, cross-routing, scoring, expiration,
 controller-specific progress, protocol validation, and Push note-grid mapping.
 `probe:midi` asks macOS CoreMIDI for the exact input and output endpoints
-currently exposed to Chrome.
+currently exposed to Chrome. `probe:uf8 preview` verifies direct UF8 packet
+generation without opening the controller.
 
 ## Current hardware gate
 
-The central laptop currently detects the connected Stream Deck XL and SSL UF8
-over USB. The live probe found no CoreMIDI endpoints and no installed Stream
-Deck or SSL 360° host application, so USB presence alone is not enough to run a
-mission. Install the two vendor applications before calibration; SSL's own UF8
-guide describes SSL 360° as required for the controller to function.
+The central laptop detects the connected Stream Deck XL and SSL UF8 over USB,
+and both vendor host applications are now installed. The Stream Deck plugin and
+UF8 MIDI-layer path have reached a first playable mission. Direct UF8 display
+and motor packets are implemented as an isolated probe but are not yet wired
+into the authoritative mission loop.
 
 The remaining physical gates are:
 
-- install Stream Deck, load the local plugin, and export a verified 32-key XL
-  profile;
-- install SSL 360°, expose eight UF8 MIDI CC faders, and learn them in the
-  console;
+- export and document a verified 32-key Stream Deck XL profile;
+- replace the UF8 Web MIDI bridge with the direct adapter once its input event
+  frames are decoded;
 - connect the Push, identify its generation, and tune its User-port LED
   palette;
 - complete one 90-second mission without using the development simulator.
