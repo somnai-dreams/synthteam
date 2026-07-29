@@ -119,7 +119,7 @@ bun run probe:uf8 zero-faders
 See
 [`packages/ssl-uf8/PROTOCOL.md`](packages/ssl-uf8/PROTOCOL.md)
 for the confirmed packet format and safety boundary. Synthteam consumes the
-publishable `@synthteam/ssl-uf8` workspace package for direct hardware access.
+publishable `@somnai-dreams/ssl-uf8` workspace package for direct hardware access.
 
 ### Ableton Push
 
@@ -130,7 +130,7 @@ Two ways to connect the Push:
 and additionally drives the Push's screen: live vector path, progress, score,
 integrity, deadlines, and a HULL BREACH flash when the ship takes damage. No
 grid learning needed. The bridge consumes the publishable
-`@synthteam/ableton-push` workspace package for direct hardware access. See
+`@somnai-dreams/ableton-push` workspace package for direct hardware access. See
 `hardware/push/README.md`:
 
 ```sh

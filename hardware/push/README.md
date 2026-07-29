@@ -33,7 +33,7 @@ interstitial. In the lobby the screen shows link status; game over shows the
 result.
 
 The bridge consumes the publishable TypeScript
-`@synthteam/ableton-push` workspace package for pads, buttons, encoders, the
+`@somnai-dreams/ableton-push` workspace package for pads, buttons, encoders, the
 touch strip, LEDs, and direct RGBA display frames. `bridge.js` contains only
 the Synthteam client and game rendering; `font.js` renders its text.
 

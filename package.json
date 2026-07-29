@@ -18,7 +18,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@synthteam/ssl-uf8": "workspace:*"
+    "@somnai-dreams/ssl-uf8": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

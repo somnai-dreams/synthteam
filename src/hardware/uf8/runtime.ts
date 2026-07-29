@@ -18,7 +18,7 @@ import {
   UF8_DISPLAY_HEIGHT,
   UF8_DISPLAY_WIDTH,
   UF8_FADER_COUNT,
-} from "@synthteam/ssl-uf8";
+} from "@somnai-dreams/ssl-uf8";
 import {
   createUf8AnimationFrames,
   UF8_ANIMATION_INTERVAL_MS,

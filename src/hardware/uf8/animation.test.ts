@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Uf8FrameDecoder } from "@synthteam/ssl-uf8";
+import { Uf8FrameDecoder } from "@somnai-dreams/ssl-uf8";
 import {
   createUf8AnimationFrames,
   UF8_ANIMATION_INTERVAL_MS,

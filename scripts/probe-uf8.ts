@@ -12,7 +12,7 @@ import {
   UF8_DISPLAY_HEIGHT,
   UF8_DISPLAY_WIDTH,
   UF8_FADER_COUNT,
-} from "@synthteam/ssl-uf8";
+} from "@somnai-dreams/ssl-uf8";
 import { UF8_ZERO_FADER_STOP } from "../src/shared/domain.ts";
 
 type Command = "list" | "preview" | "display-test" | "zero-faders";

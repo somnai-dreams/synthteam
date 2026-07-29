@@ -1,4 +1,4 @@
-# @synthteam/ssl-uf8
+# @somnai-dreams/ssl-uf8
 
 A Bun-first driver for taking direct runtime control of an SSL UF8:
 
@@ -12,6 +12,12 @@ A Bun-first driver for taking direct runtime control of an SSL UF8:
 The package implements only the narrow runtime surface confirmed in
 [`PROTOCOL.md`](./PROTOCOL.md). It does not contain firmware, bootloader,
 EEPROM, or persistent-configuration commands.
+
+## Install
+
+```sh
+bun add @somnai-dreams/ssl-uf8
+```
 
 ## Requirements
 
@@ -36,7 +42,7 @@ import {
   rgb565,
   setUf8DisplayColour,
   Uf8Session,
-} from "@synthteam/ssl-uf8";
+} from "@somnai-dreams/ssl-uf8";
 
 const [device] = listUf8Devices();
 if (device === undefined) {

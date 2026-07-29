@@ -1,4 +1,4 @@
-# @synthteam/ableton-push
+# @somnai-dreams/ableton-push
 
 A Bun-first driver for using Ableton Push as an independent control surface:
 
@@ -11,6 +11,12 @@ A Bun-first driver for using Ableton Push as an independent control surface:
 Push 3 is the currently configured target. Push 2 uses Ableton's documented
 display protocol and known USB product ID. Both models remain experimental
 until they complete the package's attached-device validation matrix.
+
+## Install
+
+```sh
+bun add @somnai-dreams/ableton-push
+```
 
 ## Requirements
 
@@ -30,7 +36,7 @@ import {
   HEIGHT,
   PAD_COLORS,
   WIDTH,
-} from "@synthteam/ableton-push";
+} from "@somnai-dreams/ableton-push";
 
 const push = await AbletonPush.open({ model: "push3" });
 const unsubscribe = push.onInput((event) => {

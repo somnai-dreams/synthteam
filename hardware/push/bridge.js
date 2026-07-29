@@ -29,7 +29,7 @@ import {
   isPushRgbButton,
   PAD_COLORS,
   WIDTH,
-} from "@synthteam/ableton-push";
+} from "@somnai-dreams/ableton-push";
 
 // Push palette index + screen RGB for each PushPathColor the game uses.
 const PATH_COLORS = {
