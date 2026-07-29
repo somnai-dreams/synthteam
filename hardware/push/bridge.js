@@ -128,7 +128,7 @@ let defend = null;
 let cow = null;
 
 function initCow(cowTask) {
-  lightPath(null);
+  clearPadGrid();
   cow = {
     taskId: cowTask.id,
     progress: 0.5,
