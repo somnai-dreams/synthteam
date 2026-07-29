@@ -102,9 +102,27 @@ const uf8 = new Uf8Runtime({
       applyGameHardwareEvent(event);
       return;
     }
+    scheduleIdleFaderReset();
     broadcastSnapshots();
   },
 });
+
+// Outside a mission the motorized faders snap back to the 0 DB stop
+// shortly after being moved, so the desk always rests in a known
+// state. Debounced so it doesn't fight a hand mid-drag.
+let idleFaderResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleIdleFaderReset(): void {
+  if (idleFaderResetTimer !== null) {
+    clearTimeout(idleFaderResetTimer);
+  }
+  idleFaderResetTimer = setTimeout(() => {
+    idleFaderResetTimer = null;
+    if (game.kind !== "playing" && uf8.state.kind === "connected") {
+      uf8.moveFadersTo(UF8_ZERO_FADER_STOP.value);
+    }
+  }, 800);
+}
 
 const port = parsePort(Bun.env["PORT"]);
 const phoneUrls = findPhoneUrls(port);
@@ -247,10 +265,20 @@ function handleMessage(
       return;
     case "trigger-activity":
       if (requireConsole(socket)) {
+        // No mission? Spin up a sandbox one so activities are always
+        // testable straight from the lobby.
+        if (game.kind === "lobby" || game.kind === "game-over") {
+          const mission = createMission(Date.now(), undefined, undefined, [
+            ...uf8FaderValues,
+          ]);
+          mission.level = 2; // variety-capable level profile
+          game = { kind: "playing", mission };
+          addActivity("Test mission started", "neutral");
+        }
         if (game.kind !== "playing") {
           send(socket, {
             type: "error",
-            message: "Start a mission before triggering activities",
+            message: "Wait for the countdown to finish",
           });
           return;
         }

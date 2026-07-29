@@ -556,7 +556,7 @@ function gameSettingsMarkup(consoleSnapshot: ConsoleSnapshot): string {
 }
 
 function testingPanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
-  const playing = consoleSnapshot.phase.kind === "playing";
+  const countdown = consoleSnapshot.phase.kind === "countdown";
   return `
     <section class="test-panel">
       <div class="panel-heading">
@@ -566,13 +566,17 @@ function testingPanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
       <div class="test-buttons">
         ${GAME_TASK_KINDS.map(
           (kind) => `
-          <button class="secondary-button js-trigger" data-kind="${kind}" ${playing ? "" : "disabled"}>
+          <button class="secondary-button js-trigger" data-kind="${kind}" ${countdown ? "disabled" : ""}>
             ${GAME_INFO[kind].name}
           </button>
         `,
         ).join("")}
       </div>
-      <p class="hardware-note">${playing ? "Replaces that station's current order immediately." : "Start a mission to trigger activities."}</p>
+      <p class="hardware-note">${
+        consoleSnapshot.phase.kind === "playing"
+          ? "Replaces that station's current order immediately."
+          : "Starts a sandbox test mission and triggers the order — no phones needed."
+      }</p>
     </section>
   `;
 }
