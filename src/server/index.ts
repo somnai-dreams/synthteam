@@ -4,8 +4,9 @@ import {
   advanceMission,
   applyHardwareEvent,
   createMission,
-  forceOrderTask,
+  createStandaloneMission,
   getActivitySettings,
+  prepareStandaloneRound,
   setActivitySettings,
 } from "../game/mission.ts";
 import {
@@ -39,6 +40,7 @@ import type {
   ClientMessage,
   ConsoleSnapshot,
   MissionPhaseView,
+  MissionRunMode,
   PhoneSnapshot,
   PushStateView,
   ServerMessage,
@@ -64,7 +66,7 @@ type SocketData = {
 type GameState =
   | { kind: "lobby" }
   | { kind: "countdown"; endsAt: number; stations: MissionStations }
-  | { kind: "playing"; mission: MissionState }
+  | { kind: "playing"; runMode: MissionRunMode; mission: MissionState }
   | {
       kind: "game-over";
       reason: "survived" | "integrity";
@@ -243,6 +245,23 @@ function handleMessage(
         startCountdown(socket);
       }
       return;
+    case "start-standalone":
+      if (requireConsole(socket)) {
+        const now = Date.now();
+        game = {
+          kind: "playing",
+          runMode: { kind: "standalone", game: message.game },
+          mission: createStandaloneMission(
+            message.game,
+            now,
+            undefined,
+            [...uf8FaderValues],
+          ),
+        };
+        addActivity(`Quick play · ${message.game}`, "success");
+        broadcastSnapshots();
+      }
+      return;
     case "reset-mission":
       if (requireConsole(socket)) {
         game = { kind: "lobby" };
@@ -261,37 +280,6 @@ function handleMessage(
             message: "Each device needs at least one game enabled",
           });
         }
-      }
-      return;
-    case "trigger-activity":
-      if (requireConsole(socket)) {
-        // No mission? Spin up a sandbox one so activities are always
-        // testable straight from the lobby.
-        if (game.kind === "lobby" || game.kind === "game-over") {
-          const mission = createMission(Date.now(), undefined, undefined, [
-            ...uf8FaderValues,
-          ]);
-          mission.level = 2; // variety-capable level profile
-          game = { kind: "playing", mission };
-          addActivity("Test mission started", "neutral");
-        }
-        if (game.kind !== "playing") {
-          send(socket, {
-            type: "error",
-            message: "Wait for the countdown to finish",
-          });
-          return;
-        }
-        const forced = forceOrderTask(game.mission, message.kind, Date.now());
-        if (forced === null) {
-          send(socket, {
-            type: "error",
-            message: "Orders are not running right now",
-          });
-          return;
-        }
-        addActivity(`Triggered ${message.kind}`, "neutral");
-        broadcastSnapshots();
       }
       return;
     case "hardware-event":
@@ -393,9 +381,9 @@ function applyGameHardwareEvent(event: HardwareEvent): void {
   if (game.kind !== "playing") {
     return;
   }
-  recordOutcomes(
-    applyHardwareEvent(game.mission, event, Date.now()).outcomes,
-  );
+  const now = Date.now();
+  const outcomes = applyHardwareEvent(game.mission, event, now).outcomes;
+  recordOutcomes(continueStandaloneIfNeeded(outcomes, now));
   broadcastSnapshots();
 }
 
@@ -420,6 +408,7 @@ function tick(): void {
       if (now >= game.endsAt) {
         game = {
           kind: "playing",
+          runMode: { kind: "campaign" },
           mission: createMission(
             now,
             game.stations,
@@ -436,12 +425,47 @@ function tick(): void {
     case "playing": {
       const outcomes = advanceMission(game.mission, now).outcomes;
       if (outcomes.length > 0 || crewChanged) {
-        recordOutcomes(outcomes);
+        recordOutcomes(continueStandaloneIfNeeded(outcomes, now));
         broadcastSnapshots();
       }
       return;
     }
   }
+}
+
+function continueStandaloneIfNeeded(
+  outcomes: readonly MissionOutcome[],
+  now: number,
+): readonly MissionOutcome[] {
+  if (game.kind !== "playing" || game.runMode.kind !== "standalone") {
+    return outcomes;
+  }
+  const roundEnded = outcomes.some((outcome) => {
+    switch (outcome.kind) {
+      case "completed":
+      case "expired":
+      case "mission-ended":
+        return true;
+      case "mistake":
+      case "activity-started":
+      case "level-completed":
+      case "level-started":
+      case "interstitial-completed":
+      case "interstitial-expired":
+      case "procedure-completed":
+      case "procedure-expired":
+        return false;
+    }
+  });
+  if (!roundEnded) {
+    return outcomes;
+  }
+  prepareStandaloneRound(
+    game.mission,
+    game.runMode.game,
+    now,
+  );
+  return outcomes.filter((outcome) => outcome.kind !== "mission-ended");
 }
 
 function recordOutcomes(outcomes: readonly MissionOutcome[]): void {
@@ -735,6 +759,7 @@ function phaseView(): MissionPhaseView {
           uf8Channels: profile.uf8Channels,
           pushGridSize: profile.pushGridSize,
         },
+        runMode: game.runMode,
         score: game.mission.score,
         integrity: game.mission.integrity,
         combo: game.mission.combo,

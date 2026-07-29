@@ -884,6 +884,61 @@ small {
   max-width: 680px;
 }
 
+.standalone-header {
+  display: grid;
+  min-height: 116px;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 22px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--station) 6%, var(--panel));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--station) 26%, transparent),
+    var(--shadow);
+}
+
+.standalone-header h2 {
+  margin-top: 4px;
+  font-size: 1.8rem;
+  text-wrap: balance;
+}
+
+.standalone-header p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-wrap: pretty;
+}
+
+.standalone-actions {
+  display: grid;
+  min-width: 190px;
+  gap: 12px;
+}
+
+.standalone-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.56rem;
+  letter-spacing: 0.09em;
+}
+
+.standalone-stats strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--station);
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.standalone-actions .secondary-button {
+  min-width: 150px;
+}
+
 .activity-banner {
   display: flex;
   min-height: 48px;
@@ -915,6 +970,14 @@ small {
 
 .activity-banner.mode-interstitial strong {
   color: var(--green);
+}
+
+.activity-banner.mode-standalone {
+  box-shadow: 0 0 0 1px rgba(92, 225, 230, 0.28);
+}
+
+.activity-banner.mode-standalone strong {
+  color: var(--cyan);
 }
 
 .activity-banner.mode-reactor-procedure {
@@ -1624,13 +1687,38 @@ small {
 /* ---- Game settings / testing / guide panels ---- */
 
 .game-settings,
-.test-panel,
+.quick-play-panel,
 .game-guide {
   margin-top: 20px;
   padding: 20px;
   border-radius: 14px;
   background: var(--panel);
   box-shadow: var(--shadow);
+}
+
+.quick-play-panel {
+  padding: 22px;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 88% 0%, rgba(92, 225, 230, 0.08), transparent 38%),
+    var(--panel);
+}
+
+.quick-play-panel > .panel-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.quick-play-panel > .panel-heading p {
+  max-width: 520px;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  text-align: right;
+  text-wrap: pretty;
 }
 
 .panel-heading h2 {
@@ -1663,10 +1751,75 @@ small {
   accent-color: var(--station);
 }
 
-.test-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.quick-play-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.quick-play-game {
+  display: grid;
+  min-height: 68px;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--panel-raised);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition-property: scale, background-color, box-shadow;
+  transition-duration: 150ms;
+}
+
+.quick-play-game:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--station) 7%, var(--panel-raised));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--station) 30%, transparent);
+}
+
+.quick-play-game:active:not(:disabled) {
+  scale: 0.96;
+}
+
+.quick-play-game:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.quick-play-game.is-active {
+  background: color-mix(in srgb, var(--station) 10%, var(--panel-raised));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--station) 48%, transparent),
+    0 0 20px color-mix(in srgb, var(--station) 8%, transparent);
+}
+
+.quick-play-game strong,
+.quick-play-game small {
+  display: block;
+}
+
+.quick-play-game strong {
+  font-size: 0.75rem;
+  text-wrap: balance;
+}
+
+.quick-play-game small,
+.quick-play-game i {
+  margin-top: 4px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.52rem;
+  font-style: normal;
+  letter-spacing: 0.09em;
+}
+
+.quick-play-game i {
+  margin: 0;
+  color: var(--station);
+  font-weight: 800;
 }
 
 .guide-grid {
@@ -1752,6 +1905,29 @@ small {
   font-size: 22px;
 }
 
+.pv-fader {
+  position: relative;
+  width: 7px;
+  height: 40px;
+  border-radius: 4px;
+  background: #1b242a;
+}
+
+.pv-fader i {
+  position: absolute;
+  top: 19px;
+  left: -6px;
+  width: 19px;
+  height: 7px;
+  border-radius: 3px;
+  background: var(--station);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--station) 60%, transparent);
+}
+
+.standalone-deadline {
+  margin-top: 13px;
+}
+
 .pv-missiles {
   color: var(--danger);
   letter-spacing: 4px;
@@ -1827,4 +2003,24 @@ small {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--muted);
+}
+
+@media (max-width: 720px) {
+  .quick-play-panel > .panel-heading {
+    display: block;
+  }
+
+  .quick-play-panel > .panel-heading p {
+    margin-top: -4px;
+    text-align: left;
+  }
+
+  .standalone-header {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+
+  .standalone-actions {
+    min-width: 0;
+    grid-column: 1 / -1;
+  }
 }

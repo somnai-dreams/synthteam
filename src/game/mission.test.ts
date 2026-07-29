@@ -21,8 +21,10 @@ import {
   advanceMission,
   applyHardwareEvent,
   createMission,
+  createStandaloneMission,
   defaultActivitySettings,
-  forceOrderTask,
+  GAME_TASK_KINDS,
+  prepareStandaloneRound,
   setActivitySettings,
   type MissionDependencies,
 } from "./mission.ts";
@@ -399,7 +401,7 @@ function levelTwoPushTask(roller: number | (() => number)) {
   return { mission, dependencies };
 }
 
-describe("activity settings and testing triggers", () => {
+describe("activity settings and standalone launcher", () => {
   test("rejects settings that disable every game of a station", () => {
     const settings = defaultActivitySettings();
     settings["push-path"] = false;
@@ -427,17 +429,44 @@ describe("activity settings and testing triggers", () => {
     }
   });
 
-  test("forceOrderTask swaps in the requested order kind", () => {
+  test("creates one full-surface round for every standalone game", () => {
     const dependencies = deterministicDependencies();
-    const mission = createMission(1_000, STATIONS, dependencies);
+    for (const kind of GAME_TASK_KINDS) {
+      const mission = createStandaloneMission(
+        kind,
+        1_000,
+        dependencies,
+      );
+      expect(mission.level).toBe(5);
+      expect(orders(mission).tasks).toHaveLength(1);
+      expect(orders(mission).tasks[0]?.kind).toBe(kind);
+    }
+  });
 
-    const forced = forceOrderTask(mission, "push-cow", 2_000, dependencies);
-
-    expect(forced?.kind).toBe("push-cow");
-    const pushTask = orders(mission).tasks.find(
-      (task) => stationForTask(task) === "push",
+  test("starts a fresh selected round without wiping the session score", () => {
+    const dependencies = deterministicDependencies();
+    const mission = createStandaloneMission(
+      "push-path",
+      1_000,
+      dependencies,
     );
-    expect(pushTask?.kind).toBe("push-cow");
+    mission.score = 420;
+    mission.combo = 3;
+    mission.integrity = 12;
+    mission.levelObjectivesCompleted = 7;
+
+    prepareStandaloneRound(
+      mission,
+      "uf8-fader",
+      2_000,
+      dependencies,
+    );
+
+    expect(orders(mission).tasks[0]?.kind).toBe("uf8-fader");
+    expect(mission.levelObjectivesCompleted).toBe(0);
+    expect(mission.integrity).toBe(100);
+    expect(mission.score).toBe(420);
+    expect(mission.combo).toBe(3);
   });
 });
 

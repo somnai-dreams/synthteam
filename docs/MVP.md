@@ -26,6 +26,13 @@ disconnected phone keeps its claim for ten seconds to survive a brief network
 drop; after that reservation expires, the controller becomes available again.
 Two claimed controllers are enough to launch, and the third remains optional.
 
+The console also owns an explicit standalone run mode. It can launch one
+selected game immediately without a phone claim or countdown, displays the
+otherwise private order on the console, unlocks the full target surface, and
+loops fresh rounds of that selection. Standalone play is for practice,
+demonstration, hardware setup, and rapid minigame iteration; it does not alter
+the multiplayer campaign rules or gate.
+
 ## Controller-specific gameplay
 
 ### Stream Deck XL: routing and communications
@@ -75,6 +82,17 @@ button command.
 - Missed interstitials cost little integrity and still unlock the next level.
 - The mission succeeds when the final level is cleared and fails when integrity
   reaches zero.
+
+## Standalone rules
+
+- The console can launch any Deck, UF8, or Push order directly.
+- Exactly one target task runs at a time and its complete instruction is public.
+- No crew slot, phone, or countdown is required.
+- The target device uses its full control surface.
+- A clear or timeout starts a fresh round of the same game.
+- Score and combo persist across rounds; integrity resets between rounds.
+- Choosing another game switches immediately, and Exit to Lobby ends the
+  session.
 
 ## MVP gate
 

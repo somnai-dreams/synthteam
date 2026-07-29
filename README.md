@@ -37,6 +37,20 @@ remaining station to the routing cycle when it joins before launch. A
 disconnected phone keeps its station reserved for ten seconds before the
 controller becomes claimable again.
 
+## Quick play without phones
+
+The central console also has a **Quick Play** launcher. Choose any individual
+Deck, UF8, or Push game to start it immediately with no phone claim or
+countdown. The complete order remains visible on the console, all controls are
+unlocked, and the selected game starts a fresh round after every clear or
+timeout. Scores and combos continue until **Exit to Lobby** or another game is
+selected.
+
+Connected hardware receives the same task as a campaign. The console simulator
+also makes Deck keys, UF8 faders, and Push pads available without a crew claim;
+Push games that depend on its display, labelled buttons, dial, or touch strip
+still require the physical controller.
+
 ## Mission rhythm
 
 Every run starts at Level 1 and advances automatically when the crew clears
@@ -147,13 +161,13 @@ The plugin renders the server-owned key names directly onto the LCD keys and
 forwards key-down/key-up events. It expects Synthteam on the default port 4179.
 See `hardware/streamdeck/README.md` for the current profile limitation.
 
-## Development simulator
+## Console simulator
 
-The central console includes an explicit simulator for every controller active
-in the current mission. It is useful for tests and UI work when the controllers
-are not attached.
-It is not intended for a production mission—the MVP gate requires completing
-the mission without touching the central laptop after launch.
+Quick Play exposes the selected controller simulator without requiring a phone.
+Campaign runs expose simulators only for claimed controllers. The simulator is
+useful for practice, tests, and UI work when hardware is not attached; the
+multiplayer MVP gate still requires completing a campaign without touching the
+central laptop after launch.
 
 ## Verification
 
@@ -168,9 +182,9 @@ bun run probe:uf8 preview
 `check` uses TypeScript 7 plus type-aware oxlint. The current tests cover
 two-and-three-device task generation, five-level control bounds, cross-routing,
 Deck hold/tap/release orders, interstitial transitions and penalties, the
-shared reactor finale, scoring, expiration, station claim races and reconnect
-reservations, direct UF8 framing and input decoding, protocol validation, and
-Push note-grid mapping.
+shared reactor finale, standalone game construction, scoring, expiration,
+station claim races and reconnect reservations, direct UF8 framing and input
+decoding, protocol validation, and Push note-grid mapping.
 `probe:midi` asks macOS CoreMIDI for the exact input and output endpoints
 currently exposed to Chrome. `probe:uf8 preview` verifies direct UF8 packet
 generation without opening the controller.

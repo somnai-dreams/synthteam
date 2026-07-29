@@ -28,8 +28,10 @@ import {
   stationHardwareAvailable,
 } from "../shared/protocol.ts";
 import {
+  CONFIGURABLE_GAME_TASK_KINDS,
   GAME_TASK_KINDS,
   type ActivitySettings,
+  type ConfigurableGameTaskKind,
   type GameTaskKind,
 } from "../game/mission.ts";
 import { MidiBridge, type MidiDeviceOption } from "./midi.ts";
@@ -455,6 +457,14 @@ type GameInfo = {
 };
 
 const GAME_INFO: Record<GameTaskKind, GameInfo> = {
+  "uf8-fader": {
+    name: "Fader calibration",
+    station: "uf8",
+    order: "SET COOLANT TO −20 DB",
+    description:
+      "Move the named motorized fader to the called dB stop and hold it inside the target band.",
+    preview: `<span class="pv-fader"><i></i></span><span class="pv-chip">−20 DB</span>`,
+  },
   "streamdeck-route": {
     name: "Route",
     station: "streamdeck",
@@ -515,8 +525,8 @@ const GAME_INFO: Record<GameTaskKind, GameInfo> = {
 
 function gameSettingsMarkup(consoleSnapshot: ConsoleSnapshot): string {
   const settings = consoleSnapshot.activitySettings;
-  const groups: Record<string, GameTaskKind[]> = {};
-  for (const kind of GAME_TASK_KINDS) {
+  const groups: Record<string, ConfigurableGameTaskKind[]> = {};
+  for (const kind of CONFIGURABLE_GAME_TASK_KINDS) {
     const station = GAME_INFO[kind].station;
     (groups[station] ??= []).push(kind);
   }
@@ -555,28 +565,41 @@ function gameSettingsMarkup(consoleSnapshot: ConsoleSnapshot): string {
   `;
 }
 
-function testingPanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
-  const countdown = consoleSnapshot.phase.kind === "countdown";
+function quickPlayMarkup(consoleSnapshot: ConsoleSnapshot): string {
+  const activeGame =
+    consoleSnapshot.phase.kind === "playing" &&
+    consoleSnapshot.phase.runMode.kind === "standalone"
+      ? consoleSnapshot.phase.runMode.game
+      : null;
   return `
-    <section class="test-panel">
+    <section class="quick-play-panel">
       <div class="panel-heading">
-        <div class="eyebrow">TESTING</div>
-        <h2>Trigger an activity now</h2>
+        <div>
+          <div class="eyebrow">NO PHONE REQUIRED</div>
+          <h2>Quick play</h2>
+        </div>
+        <p>Launch one game directly. Its full instruction stays on this console and a fresh round starts after every clear or timeout.</p>
       </div>
-      <div class="test-buttons">
+      <div class="quick-play-grid">
         ${GAME_TASK_KINDS.map(
-          (kind) => `
-          <button class="secondary-button js-trigger" data-kind="${kind}" ${countdown ? "disabled" : ""}>
-            ${GAME_INFO[kind].name}
+          (kind) => {
+            const info = GAME_INFO[kind];
+            return `
+          <button
+            class="quick-play-game station-${info.station} ${activeGame === kind ? "is-active" : ""}"
+            data-quick-play="${kind}"
+          >
+            <span class="station-indicator"></span>
+            <span>
+              <strong>${info.name}</strong>
+              <small>${stationShortName(info.station)}</small>
+            </span>
+            <i>${activeGame === kind ? "RUNNING" : "PLAY"}</i>
           </button>
-        `,
+        `;
+          },
         ).join("")}
       </div>
-      <p class="hardware-note">${
-        consoleSnapshot.phase.kind === "playing"
-          ? "Replaces that station's current order immediately."
-          : "Starts a sandbox test mission and triggers the order — no phones needed."
-      }</p>
     </section>
   `;
 }
@@ -643,9 +666,9 @@ function consoleMarkup(consoleSnapshot: ConsoleSnapshot): string {
         </div>
       </header>
       ${consolePhaseMarkup(consoleSnapshot)}
+      ${quickPlayMarkup(consoleSnapshot)}
       ${hardwarePanelMarkup(consoleSnapshot)}
       ${gameSettingsMarkup(consoleSnapshot)}
-      ${testingPanelMarkup(consoleSnapshot)}
       ${gameGuideMarkup()}
       ${activityMarkup(consoleSnapshot)}
       ${errorMarkup()}
@@ -680,17 +703,33 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
       if (consoleSnapshot.mission === null) {
         throw new Error("Console mission state is missing");
       }
+      const standaloneGame =
+        consoleSnapshot.phase.runMode.kind === "standalone"
+          ? consoleSnapshot.phase.runMode.game
+          : null;
       return `
-        <section class="console-mission">
-          ${missionMeterMarkup(consoleSnapshot.phase)}
+        <section class="console-mission ${standaloneGame !== null ? "mode-standalone" : "mode-campaign"}">
+          ${
+            standaloneGame !== null
+              ? standaloneHeaderMarkup(
+                  standaloneGame,
+                  consoleSnapshot.phase.score,
+                  consoleSnapshot.phase.combo,
+                )
+              : missionMeterMarkup(consoleSnapshot.phase)
+          }
           ${activityOverviewMarkup(consoleSnapshot)}
           <div class="simulator">
             <div class="simulator-heading">
               <div>
-                <div class="eyebrow">DEVELOPMENT INPUT</div>
-                <h2>Hardware simulator</h2>
+                <div class="eyebrow">${standaloneGame !== null ? "PLAY HERE OR ON HARDWARE" : "DEVELOPMENT INPUT"}</div>
+                <h2>${standaloneGame !== null ? "Standalone controls" : "Hardware simulator"}</h2>
               </div>
-              <p>Real adapters use the same typed events. These controls disappear from the production run screen.</p>
+              <p>${
+                standaloneGame !== null
+                  ? "The selected device works immediately. No phone assignment or countdown is required."
+                  : "Real adapters use the same typed events. These controls disappear from the production run screen."
+              }</p>
             </div>
             <div class="simulator-grid">
               ${streamDeckSimulator(consoleSnapshot)}
@@ -709,6 +748,31 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
         </section>
       `;
   }
+}
+
+function standaloneHeaderMarkup(
+  game: GameTaskKind,
+  score: number,
+  combo: number,
+): string {
+  const info = GAME_INFO[game];
+  return `
+    <div class="standalone-header station-${info.station}">
+      <span class="station-indicator"></span>
+      <div>
+        <div class="eyebrow">QUICK PLAY · ${stationShortName(info.station)}</div>
+        <h2>${info.name}</h2>
+        <p>Instructions are shown here. The same game loops until you choose another or exit.</p>
+      </div>
+      <div class="standalone-actions">
+        <div class="standalone-stats">
+          <span>SCORE <strong>${score.toLocaleString()}</strong></span>
+          <span>COMBO <strong>×${combo}</strong></span>
+        </div>
+        <button id="reset-mission" class="secondary-button">EXIT TO LOBBY</button>
+      </div>
+    </div>
+  `;
 }
 
 function consoleStationCard(
@@ -739,11 +803,17 @@ function activityOverviewMarkup(
     throw new Error("Activity overview requires an active mission");
   }
   switch (mission.activity.kind) {
-    case "orders":
+    case "orders": {
+      const standalone =
+        consoleSnapshot.phase.runMode.kind === "standalone";
       return `
-        <div class="activity-banner mode-orders">
-          <span>LEVEL ${consoleSnapshot.phase.level} · ORDERS</span>
-          <strong>${consoleSnapshot.phase.levelObjectivesCompleted}/${consoleSnapshot.phase.levelObjectiveTarget} OBJECTIVES CLEARED</strong>
+        <div class="activity-banner ${standalone ? "mode-standalone" : "mode-orders"}">
+          <span>${standalone ? "CURRENT ROUND" : `LEVEL ${consoleSnapshot.phase.level} · ORDERS`}</span>
+          <strong>${
+            standalone
+              ? "CLEAR IT BEFORE THE DEADLINE"
+              : `${consoleSnapshot.phase.levelObjectivesCompleted}/${consoleSnapshot.phase.levelObjectiveTarget} OBJECTIVES CLEARED`
+          }</strong>
         </div>
         <div class="task-overview task-count-${mission.activity.tasks.length}">
           ${mission.activity.tasks
@@ -751,6 +821,7 @@ function activityOverviewMarkup(
             .join("")}
         </div>
       `;
+    }
     case "interstitial":
       return `
         <div class="activity-banner mode-interstitial">
@@ -823,14 +894,26 @@ function interstitialCard(task: InterstitialTask): string {
 
 function taskCard(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): string {
   const reader = consoleSnapshot.crew[task.reader];
+  const standalone =
+    consoleSnapshot.phase.kind === "playing" &&
+    consoleSnapshot.phase.runMode.kind === "standalone";
   return `
     <article class="task-card station-${stationForTask(task)}">
       <div class="task-route">
-        <span>${reader === null ? stationShortName(task.reader) : escapeHtml(reader.name)} READS</span>
+        <span>${
+          standalone
+            ? "CONSOLE ORDER"
+            : `${reader === null ? stationShortName(task.reader) : escapeHtml(reader.name)} READS`
+        }</span>
         <strong>→ ${stationShortName(stationForTask(task))}</strong>
       </div>
       <p>${taskDescription(task, consoleSnapshot)}</p>
       <small>${taskProgress(task)}</small>
+      ${
+        standalone
+          ? `<div class="deadline-track standalone-deadline"><i data-deadline="${task.deadlineAt}" data-started-at="${task.createdAt}"></i></div>`
+          : ""
+      }
     </article>
   `;
 }
@@ -840,7 +923,7 @@ function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
   if (
     mission === null ||
     consoleSnapshot.phase.kind !== "playing" ||
-    consoleSnapshot.crew.streamdeck?.connection.kind !== "connected"
+    !shouldShowStationSimulator(consoleSnapshot, "streamdeck")
   ) {
     return "";
   }
@@ -926,9 +1009,7 @@ function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
   if (mission === null || consoleSnapshot.phase.kind !== "playing") {
     return "";
   }
-  if (
-    consoleSnapshot.crew.uf8?.connection.kind !== "connected"
-  ) {
+  if (!shouldShowStationSimulator(consoleSnapshot, "uf8")) {
     return "";
   }
   const activeChannels = consoleSnapshot.phase.activeControls.uf8Channels;
@@ -991,7 +1072,7 @@ function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
   if (
     mission === null ||
     consoleSnapshot.phase.kind !== "playing" ||
-    consoleSnapshot.crew.push?.connection.kind !== "connected"
+    !shouldShowStationSimulator(consoleSnapshot, "push")
   ) {
     return "";
   }
@@ -1028,6 +1109,21 @@ function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
       </div>
     </section>
   `;
+}
+
+function shouldShowStationSimulator(
+  consoleSnapshot: ConsoleSnapshot,
+  station: Station,
+): boolean {
+  if (consoleSnapshot.phase.kind !== "playing") {
+    return false;
+  }
+  switch (consoleSnapshot.phase.runMode.kind) {
+    case "campaign":
+      return consoleSnapshot.crew[station]?.connection.kind === "connected";
+    case "standalone":
+      return GAME_INFO[consoleSnapshot.phase.runMode.game].station === station;
+  }
 }
 
 function pushPadState(
@@ -1072,7 +1168,9 @@ function pushPadState(
 function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
   for (const input of document.querySelectorAll<HTMLInputElement>(".js-game-toggle")) {
     input.addEventListener("change", () => {
-      const kind = input.dataset["kind"] as GameTaskKind | undefined;
+      const kind = input.dataset["kind"] as
+        | ConfigurableGameTaskKind
+        | undefined;
       if (kind === undefined) {
         return;
       }
@@ -1083,11 +1181,11 @@ function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
       send({ type: "set-activity-settings", settings });
     });
   }
-  for (const button of document.querySelectorAll<HTMLButtonElement>(".js-trigger")) {
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-quick-play]")) {
     button.addEventListener("click", () => {
-      const kind = button.dataset["kind"] as GameTaskKind | undefined;
-      if (kind !== undefined) {
-        send({ type: "trigger-activity", kind });
+      const game = button.dataset["quickPlay"] as GameTaskKind | undefined;
+      if (game !== undefined) {
+        send({ type: "start-standalone", game });
       }
     });
   }

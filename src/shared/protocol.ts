@@ -1,8 +1,12 @@
 import type {
   ActivitySettings,
+  ConfigurableGameTaskKind,
   GameTaskKind,
 } from "../game/mission.ts";
-import { GAME_TASK_KINDS } from "../game/mission.ts";
+import {
+  CONFIGURABLE_GAME_TASK_KINDS,
+  GAME_TASK_KINDS,
+} from "../game/mission.ts";
 import type {
   ActivePushTask,
   CrewSlots,
@@ -37,6 +41,10 @@ export type ActivityItem = {
   tone: ActivityTone;
 };
 
+export type MissionRunMode =
+  | { kind: "campaign" }
+  | { kind: "standalone"; game: GameTaskKind };
+
 export type MissionPhaseView =
   | { kind: "lobby" }
   | { kind: "countdown"; endsAt: number }
@@ -46,6 +54,7 @@ export type MissionPhaseView =
       levelObjectivesCompleted: number;
       levelObjectiveTarget: number;
       activeControls: ActiveControlsView;
+      runMode: MissionRunMode;
       score: number;
       integrity: number;
       combo: number;
@@ -163,9 +172,9 @@ export type ClientMessage =
   | { type: "streamdeck-join" }
   | { type: "push-join" }
   | { type: "start-mission" }
+  | { type: "start-standalone"; game: GameTaskKind }
   | { type: "reset-mission" }
   | { type: "set-activity-settings"; settings: ActivitySettings }
-  | { type: "trigger-activity"; kind: GameTaskKind }
   | { type: "hardware-event"; event: HardwareEvent }
   | { type: "ping" };
 
@@ -329,6 +338,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "reset-mission":
     case "ping":
       return { type: value.type };
+    case "start-standalone":
+      return isGameTaskKind(value["game"])
+        ? { type: "start-standalone", game: value["game"] }
+        : null;
     case "phone-claim":
       return typeof value.name === "string" && isStation(value.station)
         ? { type: "phone-claim", name: value.name, station: value.station }
@@ -347,10 +360,6 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         ? null
         : { type: "set-activity-settings", settings };
     }
-    case "trigger-activity":
-      return isGameTaskKind(value.kind)
-        ? { type: "trigger-activity", kind: value.kind }
-        : null;
     case "hardware-event": {
       const event = parseHardwareEvent(value.event);
       return event === null ? null : { type: "hardware-event", event };
@@ -574,6 +583,7 @@ function isPhase(value: unknown): value is MissionPhaseView {
         isIntegerInRange(value["levelObjectivesCompleted"], 0, 8) &&
         isIntegerInRange(value["levelObjectiveTarget"], 1, 8) &&
         isActiveControlsView(value["activeControls"]) &&
+        isMissionRunMode(value["runMode"]) &&
         typeof value.score === "number" &&
         typeof value.integrity === "number" &&
         typeof value.combo === "number" &&
@@ -600,6 +610,20 @@ function isActiveControlsView(value: unknown): value is ActiveControlsView {
     isIntegerInRange(value["uf8Channels"], 0, 8) &&
     isIntegerInRange(value["pushGridSize"], 0, 8)
   );
+}
+
+function isMissionRunMode(value: unknown): value is MissionRunMode {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    return false;
+  }
+  switch (value.kind) {
+    case "campaign":
+      return true;
+    case "standalone":
+      return isGameTaskKind(value["game"]);
+    default:
+      return false;
+  }
 }
 
 function isStation(value: unknown): value is Station {
@@ -659,8 +683,8 @@ function parseActivitySettings(value: unknown): ActivitySettings | null {
   if (!isRecord(value)) {
     return null;
   }
-  const settings: Partial<Record<GameTaskKind, boolean>> = {};
-  for (const kind of GAME_TASK_KINDS) {
+  const settings: Partial<Record<ConfigurableGameTaskKind, boolean>> = {};
+  for (const kind of CONFIGURABLE_GAME_TASK_KINDS) {
     const flag = value[kind];
     if (typeof flag !== "boolean") {
       return null;
