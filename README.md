@@ -129,7 +129,9 @@ Two ways to connect the Push:
 `hardware/push` connects straight to the server (like the Stream Deck plugin)
 and additionally drives the Push's screen: live vector path, progress, score,
 integrity, deadlines, and a HULL BREACH flash when the ship takes damage. No
-grid learning needed. See `hardware/push/README.md`:
+grid learning needed. The bridge consumes the publishable
+`@synthteam/ableton-push` workspace package for direct hardware access. See
+`hardware/push/README.md`:
 
 ```sh
 cd hardware/push

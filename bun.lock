@@ -18,7 +18,15 @@
     "hardware/push": {
       "name": "synthteam-push-bridge",
       "dependencies": {
+        "@synthteam/ableton-push": "workspace:*",
+      },
+    },
+    "packages/ableton-push": {
+      "name": "@synthteam/ableton-push",
+      "version": "0.1.0",
+      "dependencies": {
         "@julusian/midi": "^3.8.0",
+        "@types/w3c-web-usb": "^1.0.14",
         "usb": "^2.16.0",
       },
     },
@@ -83,6 +91,8 @@
     "@oxlint/binding-win32-ia32-msvc": ["@oxlint/binding-win32-ia32-msvc@1.76.0", "", { "os": "win32", "cpu": "ia32" }, "sha512-Ba0O659kgMv6pwO3z9PdO+K3aMxQRaw9HnG+e6AtOfgwcKFvYilciQYBoUBmxfQvOCKZe1SwjMkuB542NkuDMQ=="],
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.76.0", "", { "os": "win32", "cpu": "x64" }, "sha512-5qcirPHO8nKfkoowEVWtpAoVTcYDy6g0UT0NGic450Qv8J2NrOqg4uQ8QppRP4MDTC7Xx47lbZnmadTH03CGGA=="],
+
+    "@synthteam/ableton-push": ["@synthteam/ableton-push@workspace:packages/ableton-push"],
 
     "@synthteam/ssl-uf8": ["@synthteam/ssl-uf8@workspace:packages/ssl-uf8"],
 

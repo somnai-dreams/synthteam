@@ -6,8 +6,7 @@
     "start": "bun bridge.js"
   },
   "dependencies": {
-    "@julusian/midi": "^3.8.0",
-    "usb": "^2.16.0"
+    "@synthteam/ableton-push": "workspace:*"
   },
   "trustedDependencies": ["usb", "@julusian/midi"]
 }

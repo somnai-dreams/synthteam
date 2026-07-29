@@ -23,7 +23,13 @@
 // Run:  bun bridge.js  [--server ws://127.0.0.1:4179/ws]
 
 import { drawText, fillRect, textWidth } from "./font.js";
-import { HEIGHT, PAD_COLORS, Push3, RGB_BUTTON_CCS, WIDTH } from "./push3.js";
+import {
+  AbletonPush,
+  HEIGHT,
+  isPushRgbButton,
+  PAD_COLORS,
+  WIDTH,
+} from "@synthteam/ableton-push";
 
 // Push palette index + screen RGB for each PushPathColor the game uses.
 const PATH_COLORS = {
@@ -96,7 +102,7 @@ const serverArg = process.argv.indexOf("--server");
 const serverUrl =
   serverArg >= 0 ? process.argv[serverArg + 1] : "ws://127.0.0.1:4179/ws";
 
-const push = await Push3.open();
+const push = await AbletonPush.open({ model: "push3" });
 // Sweep the whole surface clean: another tool (e.g. the button
 // explorer) may have been killed without its cleanup running, leaving
 // stale LEDs that our scenes would never repaint.
@@ -229,7 +235,11 @@ setInterval(() => {
   }
 }, 30_000);
 
-push.on("pad", ({ x, y, down, velocity }) => {
+push.onInput((event) => {
+  if (event.kind !== "pad") {
+    return;
+  }
+  const { x, y, down, velocity } = event;
   if (!connected) {
     return;
   }
@@ -261,7 +271,11 @@ function sendEvent(event) {
   socket.send(JSON.stringify({ type: "hardware-event", event }));
 }
 
-push.on("button", ({ cc, down }) => {
+push.onInput((event) => {
+  if (event.kind !== "button") {
+    return;
+  }
+  const { cc, down } = event;
   if (!connected || !down) {
     return;
   }
@@ -284,7 +298,11 @@ push.on("button", ({ cc, down }) => {
   }
 });
 
-push.on("strip", ({ value }) => {
+push.onInput((event) => {
+  if (event.kind !== "strip") {
+    return;
+  }
+  const { value } = event;
   if (cow !== null && cow.done === null && task?.kind === "push-cow") {
     cow.velocity = (value - 8192) / 8192; // -1 .. 1, springs back to 0
     if (Math.abs(cow.velocity) > 0.05) {
@@ -293,7 +311,11 @@ push.on("strip", ({ value }) => {
   }
 });
 
-push.on("dial", ({ gesture, value }) => {
+push.onInput((event) => {
+  if (event.kind !== "dial") {
+    return;
+  }
+  const { gesture, value } = event;
   if (!connected || task?.kind !== "push-console" || gesture !== "turn") {
     return;
   }
@@ -580,7 +602,7 @@ function buttonScene() {
         }
         // Candidate verbs breathe dim<->bright (hardware pulse)
         for (const cc of Object.keys(VERB_CCS).map(Number)) {
-          if (RGB_BUTTON_CCS.has(cc)) {
+          if (isPushRgbButton(cc)) {
             push.setButton(cc, 1, 0); // dim grey base
             push.setButton(cc, PAD_COLORS.white, 10);
           } else {
@@ -590,7 +612,7 @@ function buttonScene() {
         }
         if (task.verbDone) {
           // The accepted verb switches to a fast, unmistakable pulse
-          if (RGB_BUTTON_CCS.has(verbCc)) {
+          if (isPushRgbButton(verbCc)) {
             push.setButton(verbCc, PAD_COLORS.green, 7);
           } else {
             push.setButton(verbCc, 40, 0);
