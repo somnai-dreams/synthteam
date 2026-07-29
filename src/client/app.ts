@@ -1,5 +1,6 @@
 import type {
   ActiveTask,
+  CrewMember,
   CrewSlots,
   GridPoint,
   HardwareEvent,
@@ -42,7 +43,9 @@ let socket: WebSocket | null = null;
 let snapshot: ViewSnapshot | null = null;
 let errorMessage = "";
 let savedCrew = loadSavedCrew();
-let joinDraftName = "";
+let joinDraftName = savedCrew?.name ?? "";
+let joinSelectedStation: Station | null = null;
+let awaitingCrewResume = false;
 
 connect();
 setInterval(updateLiveNumbers, 100);
@@ -56,10 +59,10 @@ function connect(): void {
     if (isConsole) {
       send({ type: "console-join" });
     } else if (savedCrew !== null) {
+      awaitingCrewResume = true;
       send({
-        type: "phone-join",
-        name: savedCrew.name,
-        resumeCrewId: savedCrew.crewId,
+        type: "phone-resume",
+        crewId: savedCrew.crewId,
       });
     }
     render();
@@ -76,6 +79,12 @@ function connect(): void {
       case "pong":
         return;
       case "error":
+        if (awaitingCrewResume) {
+          joinDraftName = savedCrew?.name ?? joinDraftName;
+          savedCrew = null;
+          clearSavedCrew();
+          awaitingCrewResume = false;
+        }
         errorMessage = message.message;
         render();
         return;
@@ -83,6 +92,7 @@ function connect(): void {
         snapshot = message.snapshot;
         errorMessage = "";
         if (snapshot.viewer.kind === "phone") {
+          awaitingCrewResume = false;
           const member = snapshot.crew[snapshot.viewer.station];
           if (member !== null) {
             savedCrew = {
@@ -127,49 +137,67 @@ function renderPhone(): void {
 
 function phoneJoinMarkup(): string {
   const crew = snapshot?.crew ?? emptyCrew();
-  const nextStation = firstFreeCrewStation(crew);
+  const selectedStation = selectedClaimStation(crew);
+  const openStationCount = STATIONS.filter(
+    (station) => crew[station] === null,
+  ).length;
   return `
     <main class="join-screen">
       <header class="brand-block stagger-1">
         <div class="eyebrow">COOPERATIVE HARDWARE PANIC</div>
         <h1>SYNTH<span>/</span>TEAM</h1>
-        <p>Join the crew. Synthteam assigns the first free control surface, then routes your orders to somebody else.</p>
+        <p>Choose an open control surface. Your phone becomes that station's private instruction channel.</p>
       </header>
       <form id="join-form" class="join-card stagger-2">
         <label class="field-label" for="crew-name">CALL SIGN</label>
         <input id="crew-name" name="name" maxlength="18" autocomplete="nickname" placeholder="Enter your name" value="${escapeHtml(joinDraftName)}" required />
         <section class="assignment-preview">
           <div class="assignment-heading">
-            <span>AUTOMATIC DEVICE ASSIGNMENT</span>
-            <strong>${nextStation === null ? "CREW FULL" : `${stationShortName(nextStation)} NEXT`}</strong>
+            <span>CHOOSE YOUR CONTROLLER</span>
+            <strong>${openStationCount === 0 ? "CREW FULL" : `${openStationCount} OPEN`}</strong>
           </div>
           <div class="assignment-queue">
-            ${STATIONS.map((station) => assignmentSlot(station, crew, nextStation)).join("")}
+            ${STATIONS.map((station) => stationChoice(station, crew, selectedStation)).join("")}
           </div>
-          <p>Priority: Stream Deck, UF8, then Push. Two phones are enough to launch.</p>
+          <p>Disconnected stations stay reserved for ten seconds. Two phones are enough to launch.</p>
         </section>
         ${errorMarkup()}
-        <button class="primary-button" type="submit" ${nextStation === null ? "disabled" : ""}>JOIN CREW <span>→</span></button>
+        <button class="primary-button" type="submit" ${selectedStation === null ? "disabled" : ""}>CLAIM STATION <span>→</span></button>
       </form>
       <p class="join-note stagger-3">Your phone only shows orders. Actions must happen on the physical controls.</p>
     </main>
   `;
 }
 
-function assignmentSlot(
+function stationChoice(
   station: Station,
   crew: CrewSlots,
-  nextStation: Station | null,
+  selectedStation: Station | null,
 ): string {
   const member = crew[station];
-  const occupied = member?.connected === true;
-  const isNext = station === nextStation;
+  const unavailable = member !== null;
+  const selected = station === selectedStation;
+  const status = stationClaimStatus(member);
+  const detail =
+    member === null ? stationRole(station) : escapeHtml(member.name);
   return `
-    <div class="assignment-slot station-${station} ${occupied ? "is-occupied" : ""} ${isNext ? "is-next" : ""}">
+    <label class="assignment-slot station-${station} ${unavailable ? "is-unavailable" : ""}">
+      <input
+        class="station-choice-input"
+        type="radio"
+        name="station"
+        value="${station}"
+        ${selected ? "checked" : ""}
+        ${unavailable ? "disabled" : ""}
+        required
+      />
       <span class="station-indicator"></span>
-      <strong>${stationShortName(station)}</strong>
-      <small>${occupied ? "IN USE" : isNext ? "NEXT" : "OPEN"}</small>
-    </div>
+      <span class="assignment-copy">
+        <strong>${stationShortName(station)}</strong>
+        <small>${detail}</small>
+      </span>
+      <span class="assignment-status">${status}</span>
+    </label>
   `;
 }
 
@@ -179,19 +207,27 @@ function bindPhoneJoin(): void {
   nameInput?.addEventListener("input", () => {
     joinDraftName = nameInput.value;
   });
+  for (const input of document.querySelectorAll<HTMLInputElement>(
+    'input[name="station"]',
+  )) {
+    input.addEventListener("change", () => {
+      joinSelectedStation = stationFromFormValue(input.value);
+    });
+  }
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(form);
     const name = data.get("name");
-    if (typeof name !== "string") {
+    const station = data.get("station");
+    if (typeof name !== "string" || typeof station !== "string") {
       return;
     }
     joinDraftName = name;
-    savedCrew = { crewId: "", name };
+    joinSelectedStation = stationFromFormValue(station);
     send({
-      type: "phone-join",
+      type: "phone-claim",
       name,
-      resumeCrewId: null,
+      station: joinSelectedStation,
     });
   });
 }
@@ -405,11 +441,10 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
     case "lobby":
       const connectedCount = connectedCrewCount(consoleSnapshot.crew);
       const ready = connectedCount >= 2;
-      const nextStation = firstFreeCrewStation(consoleSnapshot.crew);
       return `
         <section class="console-lobby">
           <div class="lobby-stations">
-            ${STATIONS.map((station) => consoleStationCard(station, consoleSnapshot.crew, nextStation)).join("")}
+            ${STATIONS.map((station) => consoleStationCard(station, consoleSnapshot.crew)).join("")}
           </div>
           <button id="start-mission" class="primary-button console-start" ${ready ? "" : "disabled"}>
             ${lobbyStartLabel(connectedCount)}
@@ -462,18 +497,18 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
 function consoleStationCard(
   station: Station,
   crew: CrewSlots,
-  nextStation: Station | null,
 ): string {
   const member = crew[station];
-  const connected = member?.connected === true;
-  const isNext = station === nextStation;
+  const connected = isCrewMemberConnected(member);
+  const reserved =
+    member !== null && member.connection.kind === "reserved";
   return `
-    <article class="console-station-card station-${station} ${isNext ? "is-next" : ""}">
+    <article class="console-station-card station-${station} ${reserved ? "is-reserved" : ""}">
       <span class="station-indicator"></span>
       <div>
         <div class="eyebrow">${stationShortName(station)}</div>
-        <h2>${connected ? escapeHtml(member.name) : "Unclaimed"}</h2>
-        <p>${connected ? "PHONE LINKED" : isNext ? "AUTO-ASSIGN NEXT" : stationRole(station)}</p>
+        <h2>${member === null ? "Unclaimed" : escapeHtml(member.name)}</h2>
+        <p>${connected ? "PHONE LINKED" : reserved ? "RECONNECT RESERVED" : stationRole(station)}</p>
       </div>
     </article>
   `;
@@ -660,7 +695,9 @@ function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
   if (mission === null) {
     return "";
   }
-  if (consoleSnapshot.crew.uf8?.connected !== true) {
+  if (
+    consoleSnapshot.crew.uf8?.connection.kind !== "connected"
+  ) {
     return "";
   }
   return `
@@ -1077,7 +1114,7 @@ function activityMarkup(consoleSnapshot: ConsoleSnapshot): string {
 
 function crewChip(station: Station, crew: CrewSlots): string {
   const member = crew[station];
-  const connected = member?.connected === true;
+  const connected = isCrewMemberConnected(member);
   return `
     <div class="crew-chip ${connected ? "is-online" : ""}">
       <i></i>
@@ -1201,21 +1238,66 @@ function saveCrew(crew: SavedCrew): void {
   window.localStorage.setItem("synthteam-crew", JSON.stringify(crew));
 }
 
+function clearSavedCrew(): void {
+  window.localStorage.removeItem("synthteam-crew");
+}
+
 function emptyCrew(): CrewSlots {
   return { streamdeck: null, uf8: null, push: null };
 }
 
 function connectedCrewCount(crew: CrewSlots): number {
-  return STATIONS.filter((station) => crew[station]?.connected === true).length;
+  return STATIONS.filter(
+    (station) => crew[station]?.connection.kind === "connected",
+  ).length;
 }
 
-function firstFreeCrewStation(crew: CrewSlots): Station | null {
+function firstUnclaimedCrewStation(crew: CrewSlots): Station | null {
   for (const station of STATIONS) {
-    if (crew[station]?.connected !== true) {
+    if (crew[station] === null) {
       return station;
     }
   }
   return null;
+}
+
+function selectedClaimStation(crew: CrewSlots): Station | null {
+  if (
+    joinSelectedStation !== null &&
+    crew[joinSelectedStation] === null
+  ) {
+    return joinSelectedStation;
+  }
+  return firstUnclaimedCrewStation(crew);
+}
+
+function stationClaimStatus(member: CrewMember | null): string {
+  if (member === null) {
+    return "OPEN";
+  }
+  switch (member.connection.kind) {
+    case "connected":
+      return "CLAIMED";
+    case "reserved":
+      return "RESERVED";
+  }
+}
+
+function isCrewMemberConnected(
+  member: CrewMember | null,
+): member is CrewMember {
+  return member?.connection.kind === "connected";
+}
+
+function stationFromFormValue(value: string): Station {
+  switch (value) {
+    case "streamdeck":
+    case "uf8":
+    case "push":
+      return value;
+    default:
+      throw new Error(`Invalid station selection: ${value}`);
+  }
 }
 
 function lobbyStartLabel(connectedCount: number): string {

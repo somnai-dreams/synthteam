@@ -20,9 +20,11 @@ Phones never submit control actions. During a mission, valid actions can only
 arrive through a hardware adapter or the explicitly labelled development
 simulator in the central console.
 
-Phones do not choose a station. The server assigns each new phone the first free
-controller in Deck → UF8 → Push order. Two players therefore get the connected
-Stream Deck and UF8 by default; the third adds Push.
+Each phone claims one currently open controller in the lobby. The server
+serializes competing claims, so two phones cannot own the same station. A
+disconnected phone keeps its claim for ten seconds to survive a brief network
+drop; after that reservation expires, the controller becomes available again.
+Two claimed controllers are enough to launch, and the third remains optional.
 
 ## Controller-specific gameplay
 

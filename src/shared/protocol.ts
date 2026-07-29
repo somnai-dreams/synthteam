@@ -130,10 +130,11 @@ export type ViewSnapshot =
 
 export type ClientMessage =
   | {
-      type: "phone-join";
+      type: "phone-claim";
       name: string;
-      resumeCrewId: string | null;
+      station: Station;
     }
+  | { type: "phone-resume"; crewId: string }
   | { type: "console-join" }
   | { type: "streamdeck-join" }
   | { type: "push-join" }
@@ -260,19 +261,18 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "reset-mission":
     case "ping":
       return { type: value.type };
-    case "phone-join": {
-      if (
-        typeof value.name !== "string" ||
-        !isNullableString(value.resumeCrewId)
-      ) {
+    case "phone-claim":
+      return typeof value.name === "string" && isStation(value.station)
+        ? { type: "phone-claim", name: value.name, station: value.station }
+        : null;
+    case "phone-resume":
+      if (typeof value.crewId !== "string" || value.crewId.length === 0) {
         return null;
       }
       return {
-        type: "phone-join",
-        name: value.name,
-        resumeCrewId: value.resumeCrewId,
+        type: "phone-resume",
+        crewId: value.crewId,
       };
-    }
     case "hardware-event": {
       const event = parseHardwareEvent(value.event);
       return event === null ? null : { type: "hardware-event", event };
@@ -357,7 +357,7 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
   if (
     !isRecord(value) ||
     !isRecord(value.viewer) ||
-    !isRecord(value.crew) ||
+    !isCrewSlots(value.crew) ||
     !isPhase(value.phase) ||
     !Array.isArray(value.activity) ||
     !isStringArray(value.phoneUrls) ||
@@ -490,6 +490,42 @@ function isStation(value: unknown): value is Station {
   return STATIONS.some((station) => station === value);
 }
 
+function isCrewSlots(value: unknown): value is CrewSlots {
+  if (!isRecord(value)) {
+    return false;
+  }
+  for (const station of STATIONS) {
+    const member = value[station];
+    if (member === null) {
+      continue;
+    }
+    if (
+      !isRecord(member) ||
+      typeof member["id"] !== "string" ||
+      typeof member["name"] !== "string" ||
+      member["station"] !== station ||
+      !isCrewConnection(member["connection"])
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function isCrewConnection(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    return false;
+  }
+  switch (value.kind) {
+    case "connected":
+      return true;
+    case "reserved":
+      return typeof value["endsAt"] === "number";
+    default:
+      return false;
+  }
+}
+
 function isNumberArrayInRange(
   value: unknown,
   length: number,
@@ -515,7 +551,6 @@ type JsonRecord = {
   type?: unknown;
   name?: unknown;
   station?: unknown;
-  resumeCrewId?: unknown;
   event?: unknown;
   message?: unknown;
   snapshot?: unknown;
@@ -547,10 +582,6 @@ type JsonRecord = {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return typeof value === "string" || value === null;
 }
 
 function isStringArray(value: unknown): value is readonly string[] {

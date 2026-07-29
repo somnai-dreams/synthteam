@@ -6,11 +6,15 @@ export type MissionStations =
   | readonly [Station, Station]
   | readonly [Station, Station, Station];
 
+export type CrewConnection =
+  | { kind: "connected" }
+  | { kind: "reserved"; endsAt: number };
+
 export type CrewMember = {
   id: string;
   name: string;
   station: Station;
-  connected: boolean;
+  connection: CrewConnection;
 };
 
 export type CrewSlots = Record<Station, CrewMember | null>;

@@ -5,7 +5,10 @@ import {
   type MissionDependencies,
 } from "../game/mission.ts";
 import { STATIONS } from "./domain.ts";
-import type { ConsoleSnapshot } from "./protocol.ts";
+import type {
+  AnonymousSnapshot,
+  ConsoleSnapshot,
+} from "./protocol.ts";
 import {
   parseClientMessage,
   parseServerMessage,
@@ -24,20 +27,43 @@ function deterministicDependencies(): MissionDependencies {
 }
 
 describe("client protocol", () => {
-  test("accepts a complete phone join", () => {
+  test("accepts an explicit phone station claim", () => {
     expect(
       parseClientMessage(
         JSON.stringify({
-          type: "phone-join",
+          type: "phone-claim",
           name: "Mara",
-          resumeCrewId: null,
+          station: "uf8",
         }),
       ),
     ).toEqual({
-      type: "phone-join",
+      type: "phone-claim",
       name: "Mara",
-      resumeCrewId: null,
+      station: "uf8",
     });
+  });
+
+  test("accepts a crew reservation resume", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "phone-resume",
+          crewId: "crew-1",
+        }),
+      ),
+    ).toEqual({ type: "phone-resume", crewId: "crew-1" });
+  });
+
+  test("rejects a claim for an unknown station", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "phone-claim",
+          name: "Mara",
+          station: "launchpad",
+        }),
+      ),
+    ).toBeNull();
   });
 
   test("rejects an invalid hardware coordinate at the boundary", () => {
@@ -88,6 +114,49 @@ describe("client protocol", () => {
         JSON.stringify({ type: "snapshot", snapshot }),
       ),
     ).toEqual({ type: "snapshot", snapshot });
+  });
+
+  test("accepts a reserved crew station and rejects a malformed reservation", () => {
+    const snapshot = {
+      viewer: { kind: "anonymous" },
+      crew: {
+        streamdeck: null,
+        uf8: {
+          id: "crew-1",
+          name: "Mara",
+          station: "uf8",
+          connection: { kind: "reserved", endsAt: 11_000 },
+        },
+        push: null,
+      },
+      phase: { kind: "lobby" },
+      activity: [],
+      phoneUrls: ["http://localhost:4179"],
+      streamDeckConnected: false,
+      pushBridgeConnected: false,
+      uf8Connection: { kind: "disconnected", message: "waiting" },
+    } satisfies AnonymousSnapshot;
+
+    expect(
+      parseServerMessage(JSON.stringify({ type: "snapshot", snapshot })),
+    ).toEqual({ type: "snapshot", snapshot });
+    expect(
+      parseServerMessage(
+        JSON.stringify({
+          type: "snapshot",
+          snapshot: {
+            ...snapshot,
+            crew: {
+              ...snapshot.crew,
+              uf8: {
+                ...snapshot.crew.uf8,
+                connection: { kind: "reserved" },
+              },
+            },
+          },
+        }),
+      ),
+    ).toBeNull();
   });
 
   test("publishes cross-routed, local, and procedure-specific directives", () => {

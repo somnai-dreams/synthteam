@@ -8,11 +8,10 @@ real control surfaces:
 - an Ableton Push for spatial navigation paths.
 
 All hardware connects to one central laptop. Every player joins from a phone
-and is automatically assigned the first free controller in Deck → UF8 → Push
-order. They receive instructions for somebody else's controller and have to
-shout them across the room. The Bun server owns the mission state and only
-accepts game actions from the physical device bridge or the clearly labelled
-development simulator.
+and claims one open controller. They receive instructions for somebody else's
+controller and have to shout them across the room. The Bun server owns station
+claims and mission state, and only accepts game actions from the physical
+device bridge or the clearly labelled development simulator.
 
 ## Start the MVP
 
@@ -31,10 +30,12 @@ bun start
 
 Open `http://localhost:4179/console` in Chrome on the central laptop. The
 console prints and displays its available LAN addresses. Open one of those
-addresses on each phone and enter a call sign.
+addresses on each phone, enter a call sign, and choose an open controller.
 
-The mission can start with two phones. A third phone automatically adds Push to
-the routing cycle when it joins before launch.
+The mission can start with any two claimed controllers. A third phone adds the
+remaining station to the routing cycle when it joins before launch. A
+disconnected phone keeps its station reserved for ten seconds before the
+controller becomes claimable again.
 
 ## Mission rhythm
 
@@ -150,8 +151,8 @@ bun run probe:uf8 preview
 `check` uses TypeScript 7 plus type-aware oxlint. The current tests cover
 two-and-three-device task generation, cross-routing, Deck hold/tap/release
 orders, Local Override transitions and penalties, the shared reactor procedure,
-scoring, expiration, direct UF8 framing and input decoding, protocol validation,
-and Push note-grid mapping.
+scoring, expiration, station claim races and reconnect reservations, direct UF8
+framing and input decoding, protocol validation, and Push note-grid mapping.
 `probe:midi` asks macOS CoreMIDI for the exact input and output endpoints
 currently exposed to Chrome. `probe:uf8 preview` verifies direct UF8 packet
 generation without opening the controller.

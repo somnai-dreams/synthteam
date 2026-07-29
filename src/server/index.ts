@@ -6,11 +6,17 @@ import {
   createMission,
 } from "../game/mission.ts";
 import {
+  claimStation,
+  connectedCrewStations,
+  releaseExpiredReservations,
+  reserveCrewStation,
+  resumeCrew,
+} from "../game/crew.ts";
+import {
   type Uf8DisplayView,
   Uf8Runtime,
 } from "../hardware/uf8/runtime.ts";
 import type {
-  CrewMember,
   CrewSlots,
   HardwareEvent,
   MissionOutcome,
@@ -21,7 +27,6 @@ import type {
   Uf8FaderValues,
 } from "../shared/domain.ts";
 import {
-  STATIONS,
   UF8_CONTROL_LABELS,
   UF8_ZERO_FADER_STOP,
 } from "../shared/domain.ts";
@@ -149,9 +154,18 @@ const server = Bun.serve<SocketData>({
       if (viewer.kind !== "phone") {
         return;
       }
-      const member = crew[viewer.station];
-      if (member !== null && member.id === viewer.crewId) {
-        member.connected = false;
+      if (
+        reserveCrewStation(
+          crew,
+          viewer.station,
+          viewer.crewId,
+          Date.now(),
+        )
+      ) {
+        const member = crew[viewer.station];
+        if (member === null) {
+          throw new Error("Reserved crew station lost its member");
+        }
         addActivity(`${member.name} lost signal`, "danger");
         broadcastSnapshots();
       }
@@ -195,8 +209,11 @@ function handleMessage(
       socket.data.viewer = { kind: "push-bridge" };
       broadcastSnapshots();
       return;
-    case "phone-join":
-      joinPhone(socket, message.name, message.resumeCrewId);
+    case "phone-claim":
+      claimPhone(socket, message.name, message.station);
+      return;
+    case "phone-resume":
+      resumePhone(socket, message.crewId);
       return;
     case "start-mission":
       if (requireConsole(socket) && game.kind === "lobby") {
@@ -222,10 +239,10 @@ function handleMessage(
   }
 }
 
-function joinPhone(
+function claimPhone(
   socket: Bun.ServerWebSocket<SocketData>,
   rawName: string,
-  resumeCrewId: string | null,
+  station: Station,
 ): void {
   const name = normalizeName(rawName);
   if (name.length === 0) {
@@ -233,25 +250,6 @@ function joinPhone(
     return;
   }
 
-  const resumedStation = stationForCrewId(resumeCrewId);
-  if (resumedStation !== null) {
-    const existing = crew[resumedStation];
-    if (existing === null) {
-      throw new Error("Resumed crew station lost its member");
-    }
-    existing.connected = true;
-    socket.data.viewer = {
-      kind: "phone",
-      crewId: existing.id,
-      station: resumedStation,
-    };
-    addActivity(
-      `${existing.name} reconnected to ${stationName(resumedStation)}`,
-      "success",
-    );
-    broadcastSnapshots();
-    return;
-  }
   if (game.kind !== "lobby") {
     send(socket, {
       type: "error",
@@ -260,20 +258,44 @@ function joinPhone(
     return;
   }
 
-  const station = firstFreeStation();
-  if (station === null) {
-    send(socket, { type: "error", message: "All three stations are occupied" });
+  const result = claimStation(crew, station, name, () => crypto.randomUUID());
+  if (result.kind === "unavailable") {
+    send(socket, {
+      type: "error",
+      message: `${stationName(station)} was just claimed. Choose another station.`,
+    });
     return;
   }
-  const member: CrewMember = {
-    id: crypto.randomUUID(),
-    name,
+  socket.data.viewer = {
+    kind: "phone",
+    crewId: result.member.id,
     station,
-    connected: true,
   };
-  crew[station] = member;
-  socket.data.viewer = { kind: "phone", crewId: member.id, station };
   addActivity(`${name} assigned to ${stationName(station)}`, "success");
+  broadcastSnapshots();
+}
+
+function resumePhone(
+  socket: Bun.ServerWebSocket<SocketData>,
+  crewId: string,
+): void {
+  const result = resumeCrew(crew, crewId);
+  if (result.kind === "expired") {
+    send(socket, {
+      type: "error",
+      message: "Your station reservation expired. Choose an open station.",
+    });
+    return;
+  }
+  socket.data.viewer = {
+    kind: "phone",
+    crewId: result.member.id,
+    station: result.station,
+  };
+  addActivity(
+    `${result.member.name} reconnected to ${stationName(result.station)}`,
+    "success",
+  );
   broadcastSnapshots();
 }
 
@@ -304,9 +326,20 @@ function applyGameHardwareEvent(event: HardwareEvent): void {
 
 function tick(): void {
   const now = Date.now();
+  const releasedCrew = releaseExpiredReservations(crew, now);
+  for (const member of releasedCrew) {
+    addActivity(
+      `${member.name}'s ${stationName(member.station)} reservation expired`,
+      "neutral",
+    );
+  }
+  const crewChanged = releasedCrew.length > 0;
   switch (game.kind) {
     case "lobby":
     case "game-over":
+      if (crewChanged) {
+        broadcastSnapshots();
+      }
       return;
     case "countdown":
       if (now >= game.endsAt) {
@@ -321,11 +354,13 @@ function tick(): void {
         };
         addActivity("All systems live", "success");
         broadcastSnapshots();
+      } else if (crewChanged) {
+        broadcastSnapshots();
       }
       return;
     case "playing": {
       const outcomes = advanceMission(game.mission, now).outcomes;
-      if (outcomes.length > 0) {
+      if (outcomes.length > 0 || crewChanged) {
         recordOutcomes(outcomes);
         broadcastSnapshots();
       }
@@ -692,31 +727,8 @@ function findPhoneUrls(serverPort: number): readonly string[] {
   return urls.length > 0 ? urls : [`http://localhost:${serverPort}`];
 }
 
-function stationForCrewId(crewId: string | null): Station | null {
-  if (crewId === null) {
-    return null;
-  }
-  for (const station of STATIONS) {
-    if (crew[station]?.id === crewId) {
-      return station;
-    }
-  }
-  return null;
-}
-
-function firstFreeStation(): Station | null {
-  for (const station of STATIONS) {
-    if (crew[station]?.connected !== true) {
-      return station;
-    }
-  }
-  return null;
-}
-
 function connectedMissionStations(): MissionStations | null {
-  const connected = STATIONS.filter(
-    (station) => crew[station]?.connected === true,
-  );
+  const connected = connectedCrewStations(crew);
   const first = connected[0];
   const second = connected[1];
   if (first === undefined || second === undefined) {
