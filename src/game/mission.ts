@@ -163,6 +163,66 @@ export type MissionDependencies = {
   makeId: () => string;
 };
 
+/** Which order variants may be generated, keyed by task kind. */
+export type ActivitySettings = Record<GameTaskKind, boolean>;
+
+export type GameTaskKind =
+  | "streamdeck-route"
+  | "streamdeck-sequence"
+  | "push-path"
+  | "push-defend"
+  | "push-console"
+  | "push-review"
+  | "push-cow";
+
+export const GAME_TASK_KINDS: readonly GameTaskKind[] = [
+  "streamdeck-route",
+  "streamdeck-sequence",
+  "push-path",
+  "push-defend",
+  "push-console",
+  "push-review",
+  "push-cow",
+];
+
+export function defaultActivitySettings(): ActivitySettings {
+  return {
+    "streamdeck-route": true,
+    "streamdeck-sequence": true,
+    "push-path": true,
+    "push-defend": true,
+    "push-console": true,
+    "push-review": true,
+    "push-cow": true,
+  };
+}
+
+let activitySettings: ActivitySettings = defaultActivitySettings();
+
+/**
+ * Replace the generation settings. Rejects (returns false) if it would
+ * disable every variant of a station. Deliberately module-level state:
+ * one central server owns one settings set.
+ */
+export function setActivitySettings(settings: ActivitySettings): boolean {
+  const deckAlive = settings["streamdeck-route"] || settings["streamdeck-sequence"];
+  const pushAlive =
+    settings["push-path"] ||
+    settings["push-defend"] ||
+    settings["push-console"] ||
+    settings["push-review"] ||
+    settings["push-cow"];
+  if (!deckAlive || !pushAlive) {
+    return false;
+  }
+  activitySettings = { ...settings };
+  return true;
+}
+
+export function getActivitySettings(): ActivitySettings {
+  return { ...activitySettings };
+}
+
 const DEFAULT_DEPENDENCIES: MissionDependencies = {
   random: Math.random,
   makeId: () => crypto.randomUUID(),
@@ -414,10 +474,15 @@ function createTaskForRoute(
   profile: MissionLevelProfile,
 ): ActiveTask {
   switch (target) {
-    case "streamdeck":
-      return dependencies.random() < profile.streamDeckSequenceChance
+    case "streamdeck": {
+      const sequenceAllowed = activitySettings["streamdeck-sequence"];
+      const routeAllowed = activitySettings["streamdeck-route"];
+      const wantSequence =
+        dependencies.random() < profile.streamDeckSequenceChance;
+      return (wantSequence && sequenceAllowed) || !routeAllowed
         ? createStreamDeckSequenceTask(reader, now, dependencies, profile)
         : createStreamDeckRouteTask(reader, now, dependencies, profile);
+    }
     case "uf8":
       return createUf8Task(reader, now, dependencies, profile);
     case "push":
@@ -539,57 +604,44 @@ function createPushTask(
   dependencies: MissionDependencies,
   profile: MissionLevelProfile,
 ): ActiveTask {
-  // Cumulative chance bands from the top of the roll, all level-driven
+  // Cumulative chance bands from the top of the roll, level-driven;
+  // disabled variants collapse to a zero-width band.
   const roll = dependencies.random();
-  const defendFloor = 1 - profile.pushDefendChance;
-  const consoleFloor = defendFloor - profile.pushConsoleChance;
-  const cowFloor = consoleFloor - profile.pushCowChance;
-  const reviewFloor = cowFloor - profile.pushReviewChance;
+  const defendChance = activitySettings["push-defend"]
+    ? profile.pushDefendChance
+    : 0;
+  const consoleChance = activitySettings["push-console"]
+    ? profile.pushConsoleChance
+    : 0;
+  const cowChance = activitySettings["push-cow"] ? profile.pushCowChance : 0;
+  const reviewChance = activitySettings["push-review"]
+    ? profile.pushReviewChance
+    : 0;
+  const defendFloor = 1 - defendChance;
+  const consoleFloor = defendFloor - consoleChance;
+  const cowFloor = consoleFloor - cowChance;
+  const reviewFloor = cowFloor - reviewChance;
   if (roll > consoleFloor && roll <= defendFloor) {
     return createPushConsoleTask(reader, now, dependencies, profile);
   }
   if (roll > cowFloor && roll <= consoleFloor) {
-    return {
-      kind: "push-cow",
-      id: dependencies.makeId(),
-      reader,
-      createdAt: now,
-      deadlineAt: now + profile.taskDurationMs,
-      action: dependencies.random() < 0.5 ? "abduct" : "release",
-    };
+    return createPushCowTask(reader, now, dependencies, profile);
   }
   if (roll > reviewFloor && roll <= cowFloor) {
-    const subject =
-      PUSH_CONSOLE_LABELS[
-        randomInteger(dependencies.random, 0, PUSH_CONSOLE_LABELS.length - 1)
-      ] ?? "WORMHOLE";
-    const verb =
-      PUSH_REVIEW_VERBS[
-        randomInteger(dependencies.random, 0, PUSH_REVIEW_VERBS.length - 1)
-      ] ?? "DELETED";
-    return {
-      kind: "push-review",
-      id: dependencies.makeId(),
-      reader,
-      createdAt: now,
-      deadlineAt: now + profile.taskDurationMs,
-      subject,
-      verb,
-      decision: dependencies.random() < 0.5 ? "undo" : "save",
-    };
+    return createPushReviewTask(reader, now, dependencies, profile);
   }
   if (roll > defendFloor) {
-    return {
-      kind: "push-defend",
-      id: dependencies.makeId(),
-      reader,
-      createdAt: now,
-      deadlineAt: now + profile.taskDurationMs,
-      missileSpeed: profile.pushDefendSpeed,
-      spawnIntervalMs: profile.pushDefendSpawnIntervalMs,
-      hull: PUSH_DEFEND_HULL,
-    };
+    return createPushDefendTask(reader, now, dependencies, profile);
   }
+  return createPushPathTask(reader, now, dependencies, profile);
+}
+
+function createPushPathTask(
+  reader: Station,
+  now: number,
+  dependencies: MissionDependencies,
+  profile: MissionLevelProfile,
+): ActiveTask {
   return {
     kind: "push-path",
     id: dependencies.makeId(),
@@ -606,6 +658,120 @@ function createPushTask(
     ),
     progress: 0,
   };
+}
+
+function createPushDefendTask(
+  reader: Station,
+  now: number,
+  dependencies: MissionDependencies,
+  profile: MissionLevelProfile,
+): ActiveTask {
+  return {
+    kind: "push-defend",
+    id: dependencies.makeId(),
+    reader,
+    createdAt: now,
+    deadlineAt: now + profile.taskDurationMs, // survive until here to pass
+    missileSpeed: profile.pushDefendSpeed,
+    spawnIntervalMs: profile.pushDefendSpawnIntervalMs,
+    hull: PUSH_DEFEND_HULL,
+  };
+}
+
+function createPushCowTask(
+  reader: Station,
+  now: number,
+  dependencies: MissionDependencies,
+  profile: MissionLevelProfile,
+): ActiveTask {
+  return {
+    kind: "push-cow",
+    id: dependencies.makeId(),
+    reader,
+    createdAt: now,
+    deadlineAt: now + profile.taskDurationMs,
+    action: dependencies.random() < 0.5 ? "abduct" : "release",
+  };
+}
+
+function createPushReviewTask(
+  reader: Station,
+  now: number,
+  dependencies: MissionDependencies,
+  profile: MissionLevelProfile,
+): ActiveTask {
+  const subject =
+    PUSH_CONSOLE_LABELS[
+      randomInteger(dependencies.random, 0, PUSH_CONSOLE_LABELS.length - 1)
+    ] ?? "WORMHOLE";
+  const verb =
+    PUSH_REVIEW_VERBS[
+      randomInteger(dependencies.random, 0, PUSH_REVIEW_VERBS.length - 1)
+    ] ?? "DELETED";
+  return {
+    kind: "push-review",
+    id: dependencies.makeId(),
+    reader,
+    createdAt: now,
+    deadlineAt: now + profile.taskDurationMs,
+    subject,
+    verb,
+    decision: dependencies.random() < 0.5 ? "undo" : "save",
+  };
+}
+
+/**
+ * Testing hook: replace a station's current order with a freshly
+ * generated task of the requested kind, bypassing the chance roll.
+ * Only works while the orders activity is running; returns the new
+ * task or null.
+ */
+export function forceOrderTask(
+  mission: MissionState,
+  kind: GameTaskKind,
+  now: number,
+  dependencies: MissionDependencies = DEFAULT_DEPENDENCIES,
+): ActiveTask | null {
+  if (mission.activity.kind !== "orders") {
+    return null;
+  }
+  const station: Station =
+    kind.startsWith("streamdeck") ? "streamdeck" : "push";
+  const index = mission.activity.tasks.findIndex(
+    (task) => stationForTask(task) === station,
+  );
+  const previous = mission.activity.tasks[index];
+  if (previous === undefined) {
+    return null;
+  }
+  const profile = missionLevelProfile(mission.level);
+  const reader = previous.reader;
+  let task: ActiveTask;
+  switch (kind) {
+    case "streamdeck-route":
+      task = createStreamDeckRouteTask(reader, now, dependencies, profile);
+      break;
+    case "streamdeck-sequence":
+      task = createStreamDeckSequenceTask(reader, now, dependencies, profile);
+      break;
+    case "push-path":
+      task = createPushPathTask(reader, now, dependencies, profile);
+      break;
+    case "push-defend":
+      task = createPushDefendTask(reader, now, dependencies, profile);
+      break;
+    case "push-console":
+      task = createPushConsoleTask(reader, now, dependencies, profile);
+      break;
+    case "push-review":
+      task = createPushReviewTask(reader, now, dependencies, profile);
+      break;
+    case "push-cow":
+      task = createPushCowTask(reader, now, dependencies, profile);
+      break;
+  }
+  mission.activity.tasks[index] = task;
+  return task;
 }
 
 function createPushConsoleTask(

@@ -1,4 +1,9 @@
 import type {
+  ActivitySettings,
+  GameTaskKind,
+} from "../game/mission.ts";
+import { GAME_TASK_KINDS } from "../game/mission.ts";
+import type {
   ActivePushTask,
   CrewSlots,
   HardwareEvent,
@@ -120,6 +125,7 @@ type SnapshotBase = {
   streamDeckConnected: boolean;
   pushBridgeConnected: boolean;
   uf8Connection: Uf8ConnectionState;
+  activitySettings: ActivitySettings;
 };
 
 export type AnonymousSnapshot = SnapshotBase & {
@@ -158,6 +164,8 @@ export type ClientMessage =
   | { type: "push-join" }
   | { type: "start-mission" }
   | { type: "reset-mission" }
+  | { type: "set-activity-settings"; settings: ActivitySettings }
+  | { type: "trigger-activity"; kind: GameTaskKind }
   | { type: "hardware-event"; event: HardwareEvent }
   | { type: "ping" };
 
@@ -284,6 +292,29 @@ function stationDisplayName(station: Station): string {
   }
 }
 
+/**
+ * Whether a station's physical hardware is present: the Stream Deck
+ * plugin, the Push bridge, or the UF8 direct link. Stations without
+ * hardware cannot be claimed.
+ */
+export function stationHardwareAvailable(
+  snapshot: {
+    streamDeckConnected: boolean;
+    pushBridgeConnected: boolean;
+    uf8Connection: Uf8ConnectionState;
+  },
+  station: Station,
+): boolean {
+  switch (station) {
+    case "streamdeck":
+      return snapshot.streamDeckConnected;
+    case "uf8":
+      return snapshot.uf8Connection.kind === "connected";
+    case "push":
+      return snapshot.pushBridgeConnected;
+  }
+}
+
 export function parseClientMessage(raw: string): ClientMessage | null {
   const value = parseJson(raw);
   if (!isRecord(value) || typeof value.type !== "string") {
@@ -310,6 +341,16 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         type: "phone-resume",
         crewId: value.crewId,
       };
+    case "set-activity-settings": {
+      const settings = parseActivitySettings(value.settings);
+      return settings === null
+        ? null
+        : { type: "set-activity-settings", settings };
+    }
+    case "trigger-activity":
+      return isGameTaskKind(value.kind)
+        ? { type: "trigger-activity", kind: value.kind }
+        : null;
     case "hardware-event": {
       const event = parseHardwareEvent(value.event);
       return event === null ? null : { type: "hardware-event", event };
@@ -420,7 +461,8 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
     !isStringArray(value.phoneUrls) ||
     typeof value.streamDeckConnected !== "boolean" ||
     typeof value.pushBridgeConnected !== "boolean" ||
-    !isUf8ConnectionState(value["uf8Connection"])
+    !isUf8ConnectionState(value["uf8Connection"]) ||
+    parseActivitySettings(value["activitySettings"]) === null
   ) {
     return false;
   }
@@ -613,6 +655,28 @@ function isNumberArrayInRange(
   );
 }
 
+function parseActivitySettings(value: unknown): ActivitySettings | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const settings: Partial<Record<GameTaskKind, boolean>> = {};
+  for (const kind of GAME_TASK_KINDS) {
+    const flag = value[kind];
+    if (typeof flag !== "boolean") {
+      return null;
+    }
+    settings[kind] = flag;
+  }
+  return settings as ActivitySettings;
+}
+
+function isGameTaskKind(value: unknown): value is GameTaskKind {
+  return (
+    typeof value === "string" &&
+    GAME_TASK_KINDS.some((kind) => kind === value)
+  );
+}
+
 function parseJson(raw: string): unknown {
   try {
     return JSON.parse(raw);
@@ -630,6 +694,7 @@ type JsonRecord = {
   index?: unknown;
   choice?: unknown;
   action?: unknown;
+  settings?: unknown;
   message?: unknown;
   snapshot?: unknown;
   kind?: unknown;

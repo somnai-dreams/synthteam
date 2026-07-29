@@ -21,6 +21,9 @@ import {
   advanceMission,
   applyHardwareEvent,
   createMission,
+  defaultActivitySettings,
+  forceOrderTask,
+  setActivitySettings,
   type MissionDependencies,
 } from "./mission.ts";
 
@@ -395,6 +398,48 @@ function levelTwoPushTask(roller: number | (() => number)) {
   advanceMission(mission, firstTask.deadlineAt, dependencies);
   return { mission, dependencies };
 }
+
+describe("activity settings and testing triggers", () => {
+  test("rejects settings that disable every game of a station", () => {
+    const settings = defaultActivitySettings();
+    settings["push-path"] = false;
+    settings["push-defend"] = false;
+    settings["push-console"] = false;
+    settings["push-review"] = false;
+    settings["push-cow"] = false;
+
+    expect(setActivitySettings(settings)).toBe(false);
+  });
+
+  test("disabled games never roll as orders", () => {
+    const settings = defaultActivitySettings();
+    settings["push-console"] = false;
+    expect(setActivitySettings(settings)).toBe(true);
+    try {
+      // 0.8 would land in the level-2 console band when enabled
+      const { mission } = levelTwoPushTask(0.8);
+      const pushTask = orders(mission).tasks.find(
+        (task) => stationForTask(task) === "push",
+      );
+      expect(pushTask?.kind).toBe("push-path");
+    } finally {
+      setActivitySettings(defaultActivitySettings());
+    }
+  });
+
+  test("forceOrderTask swaps in the requested order kind", () => {
+    const dependencies = deterministicDependencies();
+    const mission = createMission(1_000, STATIONS, dependencies);
+
+    const forced = forceOrderTask(mission, "push-cow", 2_000, dependencies);
+
+    expect(forced?.kind).toBe("push-cow");
+    const pushTask = orders(mission).tasks.find(
+      (task) => stationForTask(task) === "push",
+    );
+    expect(pushTask?.kind).toBe("push-cow");
+  });
+});
 
 describe("push console activity", () => {
   test("rolls a console order with 16 unique labels", () => {

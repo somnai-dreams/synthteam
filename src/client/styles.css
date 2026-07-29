@@ -1620,3 +1620,211 @@ small {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- Game settings / testing / guide panels ---- */
+
+.game-settings,
+.test-panel,
+.game-guide {
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.panel-heading h2 {
+  margin: 2px 0 14px;
+  font-size: 20px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.settings-group {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--panel-raised);
+}
+
+.game-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.game-toggle input {
+  accent-color: var(--station);
+}
+
+.test-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.guide-card {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--panel-raised);
+  border-left: 3px solid var(--station);
+}
+
+.guide-preview {
+  flex: 0 0 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #060a10;
+  font-size: 11px;
+}
+
+.guide-copy p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.guide-order {
+  color: var(--station) !important;
+  font-style: italic;
+}
+
+.pv-key,
+.pv-chip {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.pv-verb {
+  background: rgba(92, 225, 230, 0.15);
+  color: var(--cyan);
+}
+
+.pv-arrow {
+  color: var(--muted);
+}
+
+.pv-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 12px);
+  gap: 3px;
+}
+
+.pv-grid i {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: #131c26;
+}
+
+.pv-grid i.on {
+  background: var(--magenta);
+}
+
+.pv-grid i.next {
+  background: var(--ink);
+}
+
+.pv-emoji {
+  font-size: 22px;
+}
+
+.pv-missiles {
+  color: var(--danger);
+  letter-spacing: 4px;
+}
+
+.pv-beam {
+  color: var(--green);
+  font-size: 14px;
+  line-height: 0.6;
+}
+
+.pv-strip {
+  display: flex;
+  gap: 3px;
+}
+
+.pv-strip i {
+  font-style: normal;
+  font-size: 8px;
+  padding: 2px 3px;
+  border-radius: 3px;
+  background: #131c26;
+  color: var(--muted);
+}
+
+.pv-announce {
+  color: var(--amber);
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+/* Phone guide */
+
+.phone-guide {
+  margin: 18px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  text-align: left;
+}
+
+.phone-guide summary {
+  cursor: pointer;
+  letter-spacing: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.phone-guide-item {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  grid-template-areas: "preview title" "preview copy";
+  column-gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.phone-guide-item .guide-preview {
+  grid-area: preview;
+  flex: none;
+}
+
+.phone-guide-item strong {
+  grid-area: title;
+  font-size: 13px;
+  color: var(--station);
+}
+
+.phone-guide-item p {
+  grid-area: copy;
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}

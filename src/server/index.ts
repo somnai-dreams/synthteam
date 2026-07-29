@@ -4,6 +4,9 @@ import {
   advanceMission,
   applyHardwareEvent,
   createMission,
+  forceOrderTask,
+  getActivitySettings,
+  setActivitySettings,
 } from "../game/mission.ts";
 import {
   claimStation,
@@ -44,6 +47,7 @@ import type {
 import {
   parseClientMessage,
   publicDirectiveForStation,
+  stationHardwareAvailable,
 } from "../shared/protocol.ts";
 
 type ViewerIdentity =
@@ -228,6 +232,40 @@ function handleMessage(
         broadcastSnapshots();
       }
       return;
+    case "set-activity-settings":
+      if (requireConsole(socket)) {
+        if (setActivitySettings(message.settings)) {
+          addActivity("Game settings updated", "neutral");
+          broadcastSnapshots();
+        } else {
+          send(socket, {
+            type: "error",
+            message: "Each device needs at least one game enabled",
+          });
+        }
+      }
+      return;
+    case "trigger-activity":
+      if (requireConsole(socket)) {
+        if (game.kind !== "playing") {
+          send(socket, {
+            type: "error",
+            message: "Start a mission before triggering activities",
+          });
+          return;
+        }
+        const forced = forceOrderTask(game.mission, message.kind, Date.now());
+        if (forced === null) {
+          send(socket, {
+            type: "error",
+            message: "Orders are not running right now",
+          });
+          return;
+        }
+        addActivity(`Triggered ${message.kind}`, "neutral");
+        broadcastSnapshots();
+      }
+      return;
     case "hardware-event":
       if (
         !canSubmitHardware(socket, message.event.kind) ||
@@ -255,6 +293,14 @@ function claimPhone(
     send(socket, {
       type: "error",
       message: "New crew can only join from the lobby",
+    });
+    return;
+  }
+
+  if (!stationHardwareAvailable(hardwarePresence(), station)) {
+    send(socket, {
+      type: "error",
+      message: `${stationName(station)} hardware is not connected`,
     });
     return;
   }
@@ -473,13 +519,8 @@ function snapshotFor(
     phase: phaseView(),
     activity,
     phoneUrls,
-    streamDeckConnected: sockets.some(
-      (socket) => socket.data.viewer.kind === "streamdeck",
-    ),
-    pushBridgeConnected: sockets.some(
-      (socket) => socket.data.viewer.kind === "push-bridge",
-    ),
-    uf8Connection: uf8.state,
+    ...hardwarePresence(),
+    activitySettings: getActivitySettings(),
   };
   switch (viewer.kind) {
     case "anonymous":
@@ -678,6 +719,18 @@ function phaseView(): MissionPhaseView {
         score: game.score,
       };
   }
+}
+
+function hardwarePresence() {
+  return {
+    streamDeckConnected: sockets.some(
+      (socket) => socket.data.viewer.kind === "streamdeck",
+    ),
+    pushBridgeConnected: sockets.some(
+      (socket) => socket.data.viewer.kind === "push-bridge",
+    ),
+    uf8Connection: uf8.state,
+  };
 }
 
 function requireConsole(socket: Bun.ServerWebSocket<SocketData>): boolean {

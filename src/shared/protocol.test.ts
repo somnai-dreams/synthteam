@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { defaultActivitySettings } from "../game/mission.ts";
 import {
   applyHardwareEvent,
   createMission,
@@ -107,6 +108,7 @@ describe("client protocol", () => {
       uf8Connection: { kind: "connected", serial: "UF-200292" },
       mission: null,
       uf8Faders: [0, 0, 0, 0, 0, 0, 0, 0],
+      activitySettings: defaultActivitySettings(),
     } satisfies ConsoleSnapshot;
 
     expect(
@@ -135,6 +137,7 @@ describe("client protocol", () => {
       streamDeckConnected: false,
       pushBridgeConnected: false,
       uf8Connection: { kind: "disconnected", message: "waiting" },
+      activitySettings: defaultActivitySettings(),
     } satisfies AnonymousSnapshot;
 
     expect(

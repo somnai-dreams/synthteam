@@ -23,7 +23,15 @@ import type {
   PhoneSnapshot,
   ViewSnapshot,
 } from "../shared/protocol.ts";
-import { parseServerMessage } from "../shared/protocol.ts";
+import {
+  parseServerMessage,
+  stationHardwareAvailable,
+} from "../shared/protocol.ts";
+import {
+  GAME_TASK_KINDS,
+  type ActivitySettings,
+  type GameTaskKind,
+} from "../game/mission.ts";
 import { MidiBridge, type MidiDeviceOption } from "./midi.ts";
 
 type SavedCrew = {
@@ -165,6 +173,7 @@ function phoneJoinMarkup(): string {
         <button class="primary-button" type="submit" ${selectedStation === null ? "disabled" : ""}>CLAIM STATION <span>→</span></button>
       </form>
       <p class="join-note stagger-3">Your phone only shows orders. Actions must happen on the physical controls.</p>
+      ${phoneGuideMarkup()}
     </main>
   `;
 }
@@ -175,11 +184,15 @@ function stationChoice(
   selectedStation: Station | null,
 ): string {
   const member = crew[station];
-  const unavailable = member !== null;
-  const selected = station === selectedStation;
-  const status = stationClaimStatus(member);
-  const detail =
-    member === null ? stationRole(station) : escapeHtml(member.name);
+  const hardwareMissing = !stationHasHardware(station);
+  const unavailable = member !== null || hardwareMissing;
+  const selected = station === selectedStation && !hardwareMissing;
+  const status = hardwareMissing ? "NO HARDWARE" : stationClaimStatus(member);
+  const detail = hardwareMissing
+    ? "connect the device to enable"
+    : member === null
+      ? stationRole(station)
+      : escapeHtml(member.name);
   return `
     <label class="assignment-slot station-${station} ${unavailable ? "is-unavailable" : ""}">
       <input
@@ -265,6 +278,7 @@ function phonePhaseMarkup(phone: PhoneSnapshot): string {
       const connectedCount = connectedCrewCount(phone.crew);
       return `
         <section class="waiting-state">
+          ${phoneGuideMarkup()}
           <div class="scope-mark"><i></i><i></i><i></i></div>
           <div class="eyebrow">STATION CLAIMED</div>
           <h2>Waiting for the crew</h2>
@@ -432,6 +446,185 @@ function renderConsole(): void {
   bindConsoleActions(snapshot);
 }
 
+type GameInfo = {
+  name: string;
+  station: Station;
+  order: string;
+  description: string;
+  preview: string;
+};
+
+const GAME_INFO: Record<GameTaskKind, GameInfo> = {
+  "streamdeck-route": {
+    name: "Route",
+    station: "streamdeck",
+    order: "ROUTE BERYL THROUGH GHOST",
+    description:
+      "Press the named source key, then the named target key on the Deck's LCD keys.",
+    preview: `<span class="pv-key">BERYL</span><span class="pv-arrow">→</span><span class="pv-key">GHOST</span>`,
+  },
+  "streamdeck-sequence": {
+    name: "Hold sequence",
+    station: "streamdeck",
+    order: "HOLD NOVA, TAP RIFT, RELEASE NOVA",
+    description:
+      "Hold the first key, tap the second while holding, then release.",
+    preview: `<span class="pv-chip">HOLD</span><span class="pv-chip">TAP</span><span class="pv-chip">RELEASE</span>`,
+  },
+  "push-path": {
+    name: "Vector trace",
+    station: "push",
+    order: "TRACE THE VIOLET VECTOR",
+    description:
+      "A colored path lights up on the pads. Press the pads in order — the next pad glows white.",
+    preview: `<span class="pv-grid"><i class="on"></i><i></i><i></i><i class="on"></i><i class="on"></i><i></i><i></i><i class="next"></i><i></i></span>`,
+  },
+  "push-defend": {
+    name: "Defend the mothership",
+    station: "push",
+    order: "DEFEND THE MOTHERSHIP",
+    description:
+      "Missiles climb the pad columns toward your saucer on the screen. Press a missile's pad to intercept; each hit costs hull.",
+    preview: `<span class="pv-emoji">🛸</span><span class="pv-missiles">▲ ▲ ▲</span>`,
+  },
+  "push-console": {
+    name: "Console order",
+    station: "push",
+    order: "QUANTIZE HIGGS BOSON · SCALE POSITRON TO 4",
+    description:
+      "16 sci-fi labels appear around the Push screen, mapped to the button rows. Press the named verb button (a real Push button) and the label. SCALE orders add the big dial: turn the counter to the target.",
+    preview: `<span class="pv-strip"><i>HIGGS</i><i>FLUX</i><i>QUARK</i><i>MUON</i></span><span class="pv-chip pv-verb">QUANTIZE</span>`,
+  },
+  "push-review": {
+    name: "Undo or save",
+    station: "push",
+    order: 'SAVE "WORMHOLE DELETED"',
+    description:
+      "The Push announces a fabricated event. Only the phone order knows the verdict — press the real Undo or Save button.",
+    preview: `<span class="pv-announce">WORMHOLE DELETED!</span><span class="pv-chip">UNDO</span><span class="pv-chip">SAVE</span>`,
+  },
+  "push-cow": {
+    name: "Tractor beam",
+    station: "push",
+    order: "ABDUCT THE COW · RELEASE THE COW",
+    description:
+      "Something is caught in the beam — it stays hidden until you move it. Slide the touch strip up to abduct, down to release.",
+    preview: `<span class="pv-emoji">🛸</span><span class="pv-beam">▽</span><span class="pv-emoji">🐄</span>`,
+  },
+};
+
+function gameSettingsMarkup(consoleSnapshot: ConsoleSnapshot): string {
+  const settings = consoleSnapshot.activitySettings;
+  const groups: Record<string, GameTaskKind[]> = {};
+  for (const kind of GAME_TASK_KINDS) {
+    const station = GAME_INFO[kind].station;
+    (groups[station] ??= []).push(kind);
+  }
+  return `
+    <section class="game-settings">
+      <div class="panel-heading">
+        <div class="eyebrow">GAME SETTINGS</div>
+        <h2>Enabled games per device</h2>
+      </div>
+      <div class="settings-grid">
+        ${Object.entries(groups)
+          .map(
+            ([station, kinds]) => `
+          <div class="settings-group station-${station}">
+            <div class="hardware-device-title">
+              <span class="station-indicator"></span>
+              <strong>${stationShortName(station as Station)}</strong>
+            </div>
+            ${kinds
+              .map(
+                (kind) => `
+              <label class="game-toggle">
+                <input type="checkbox" class="js-game-toggle" data-kind="${kind}" ${settings[kind] ? "checked" : ""} />
+                <span>${GAME_INFO[kind].name}</span>
+              </label>
+            `,
+              )
+              .join("")}
+          </div>
+        `,
+          )
+          .join("")}
+      </div>
+      <p class="hardware-note">Disabled games never roll as orders. Each device keeps at least one game.</p>
+    </section>
+  `;
+}
+
+function testingPanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
+  const playing = consoleSnapshot.phase.kind === "playing";
+  return `
+    <section class="test-panel">
+      <div class="panel-heading">
+        <div class="eyebrow">TESTING</div>
+        <h2>Trigger an activity now</h2>
+      </div>
+      <div class="test-buttons">
+        ${GAME_TASK_KINDS.map(
+          (kind) => `
+          <button class="secondary-button js-trigger" data-kind="${kind}" ${playing ? "" : "disabled"}>
+            ${GAME_INFO[kind].name}
+          </button>
+        `,
+        ).join("")}
+      </div>
+      <p class="hardware-note">${playing ? "Replaces that station's current order immediately." : "Start a mission to trigger activities."}</p>
+    </section>
+  `;
+}
+
+function gameGuideMarkup(): string {
+  return `
+    <section class="game-guide">
+      <div class="panel-heading">
+        <div class="eyebrow">GAME GUIDE</div>
+        <h2>Every order type</h2>
+      </div>
+      <div class="guide-grid">
+        ${GAME_TASK_KINDS.map((kind) => {
+          const info = GAME_INFO[kind];
+          return `
+          <article class="guide-card station-${info.station}">
+            <div class="guide-preview">${info.preview}</div>
+            <div class="guide-copy">
+              <div class="hardware-device-title">
+                <span class="station-indicator"></span>
+                <strong>${info.name}</strong>
+                <small>${stationShortName(info.station)}</small>
+              </div>
+              <p class="guide-order">"${info.order}"</p>
+              <p>${info.description}</p>
+            </div>
+          </article>
+        `;
+        }).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function phoneGuideMarkup(): string {
+  return `
+    <details class="phone-guide">
+      <summary>HOW THE GAMES WORK</summary>
+      ${GAME_TASK_KINDS.map((kind) => {
+        const info = GAME_INFO[kind];
+        return `
+        <div class="phone-guide-item station-${info.station}">
+          <div class="guide-preview">${info.preview}</div>
+          <strong>${info.name} · ${stationShortName(info.station)}</strong>
+          <p>${info.description}</p>
+        </div>
+      `;
+      }).join("")}
+    </details>
+  `;
+}
+
 function consoleMarkup(consoleSnapshot: ConsoleSnapshot): string {
   return `
     <main class="console-shell">
@@ -447,6 +640,9 @@ function consoleMarkup(consoleSnapshot: ConsoleSnapshot): string {
       </header>
       ${consolePhaseMarkup(consoleSnapshot)}
       ${hardwarePanelMarkup(consoleSnapshot)}
+      ${gameSettingsMarkup(consoleSnapshot)}
+      ${testingPanelMarkup(consoleSnapshot)}
+      ${gameGuideMarkup()}
       ${activityMarkup(consoleSnapshot)}
       ${errorMarkup()}
     </main>
@@ -870,6 +1066,27 @@ function pushPadState(
 }
 
 function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
+  for (const input of document.querySelectorAll<HTMLInputElement>(".js-game-toggle")) {
+    input.addEventListener("change", () => {
+      const kind = input.dataset["kind"] as GameTaskKind | undefined;
+      if (kind === undefined) {
+        return;
+      }
+      const settings: ActivitySettings = {
+        ...consoleSnapshot.activitySettings,
+        [kind]: input.checked,
+      };
+      send({ type: "set-activity-settings", settings });
+    });
+  }
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".js-trigger")) {
+    button.addEventListener("click", () => {
+      const kind = button.dataset["kind"] as GameTaskKind | undefined;
+      if (kind !== undefined) {
+        send({ type: "trigger-activity", kind });
+      }
+    });
+  }
   bindMidiActions();
   document.querySelector("#start-mission")?.addEventListener("click", () => {
     send({ type: "start-mission" });
@@ -1323,11 +1540,19 @@ function firstUnclaimedCrewStation(crew: CrewSlots): Station | null {
 function selectedClaimStation(crew: CrewSlots): Station | null {
   if (
     joinSelectedStation !== null &&
-    crew[joinSelectedStation] === null
+    crew[joinSelectedStation] === null &&
+    stationHasHardware(joinSelectedStation)
   ) {
     return joinSelectedStation;
   }
-  return firstUnclaimedCrewStation(crew);
+  const first = firstUnclaimedCrewStation(crew);
+  return first !== null && stationHasHardware(first) ? first : null;
+}
+
+function stationHasHardware(station: Station): boolean {
+  return snapshot === null
+    ? false
+    : stationHardwareAvailable(snapshot, station);
 }
 
 function stationClaimStatus(member: CrewMember | null): string {
