@@ -15,11 +15,12 @@ export type Uf8AnimationScene =
   | { kind: "countdown"; endsAt: number }
   | {
       kind: "mission";
-      activity: "orders" | "local-overrides" | "reactor-procedure";
+      activity: "orders" | "interstitial" | "reactor-procedure";
     }
   | { kind: "game-over"; result: "survived" | "integrity" };
 
 export type Uf8AnimationStrip = {
+  active: boolean;
   cue: {
     heading: string;
     value: string;
@@ -205,8 +206,21 @@ function createMissionFrames(
     if (strip === undefined) {
       throw new Error(`Missing UF8 mission strip ${displayIndex}`);
     }
+    if (!strip.active) {
+      frames.push(
+        drawUf8DisplayBox(
+          displayIndex,
+          0,
+          25,
+          128,
+          135,
+          BLACK,
+        ),
+      );
+      continue;
+    }
     const paletteIndex =
-      activity === "local-overrides"
+      activity === "interstitial"
         ? frameIndex % 2 === 0
           ? 0
           : 1
@@ -215,7 +229,7 @@ function createMissionFrames(
     const accent = requiredColour(BRIGHT_COLOURS, paletteIndex);
     const dim = requiredColour(DIM_COLOURS, paletteIndex);
     const background =
-      activity === "local-overrides" ? ALERT_BACKGROUND : MISSION_BACKGROUND;
+      activity === "interstitial" ? ALERT_BACKGROUND : MISSION_BACKGROUND;
     const firstHeight = 30 + ((frameIndex * 13 + displayIndex * 11) % 104);
     const secondHeight = 24 + ((frameIndex * 17 + displayIndex * 23) % 110);
     const thirdHeight = 36 + ((frameIndex * 7 + displayIndex * 31) % 98);

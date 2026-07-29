@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  advanceMission,
+  applyHardwareEvent,
   createMission,
   type MissionDependencies,
 } from "../game/mission.ts";
-import { STATIONS } from "./domain.ts";
+import { REACTOR_PROFILES, STATIONS } from "./domain.ts";
 import type {
   AnonymousSnapshot,
   ConsoleSnapshot,
@@ -159,7 +159,7 @@ describe("client protocol", () => {
     ).toBeNull();
   });
 
-  test("publishes cross-routed, local, and procedure-specific directives", () => {
+  test("publishes order, interstitial, and procedure-specific directives", () => {
     const dependencies = deterministicDependencies();
     const mission = createMission(1_000, STATIONS, dependencies);
 
@@ -167,16 +167,61 @@ describe("client protocol", () => {
       publicDirectiveForStation(mission, "streamdeck").kind,
     ).toBe("order");
 
-    advanceMission(mission, 19_000, dependencies);
-    const local = publicDirectiveForStation(mission, "streamdeck");
-    expect(local.kind).toBe("local-override");
-    if (local.kind !== "local-override") {
-      throw new Error("Expected local override directive");
+    mission.levelObjectivesCompleted = 2;
+    if (mission.activity.kind !== "orders") {
+      throw new Error("Expected order activity");
     }
-    expect(local.station).toBe("streamdeck");
+    const deck = mission.activity.tasks.find(
+      (task) => task.kind === "streamdeck-route",
+    );
+    if (deck === undefined) {
+      throw new Error("Expected Stream Deck route");
+    }
+    applyHardwareEvent(
+      mission,
+      {
+        kind: "streamdeck-key",
+        keyIndex: deck.sourceKeyIndex,
+        phase: "down",
+      },
+      2_000,
+      dependencies,
+    );
+    applyHardwareEvent(
+      mission,
+      {
+        kind: "streamdeck-key",
+        keyIndex: deck.targetKeyIndex,
+        phase: "down",
+      },
+      2_001,
+      dependencies,
+    );
+    const solo = publicDirectiveForStation(mission, "streamdeck");
+    const support = publicDirectiveForStation(mission, "uf8");
+    expect(solo.kind).toBe("interstitial");
+    expect(support.kind).toBe("interstitial-support");
 
-    advanceMission(mission, 25_000, dependencies);
-    advanceMission(mission, 43_000, dependencies);
+    const profile = REACTOR_PROFILES[0];
+    if (profile === undefined) {
+      throw new Error("Expected reactor profile");
+    }
+    mission.level = 5;
+    mission.activity = {
+      kind: "reactor-procedure",
+      startedAt: 3_000,
+      endsAt: 23_000,
+      procedure: {
+        id: "procedure-1",
+        reader: "streamdeck",
+        createdAt: 3_000,
+        deadlineAt: 23_000,
+        profile,
+        tolerance: 3,
+        holdMs: 650,
+        withinSince: null,
+      },
+    };
 
     expect(
       publicDirectiveForStation(mission, "streamdeck").kind,

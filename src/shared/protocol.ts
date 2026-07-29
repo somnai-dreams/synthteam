@@ -2,12 +2,14 @@ import type {
   ActivePushTask,
   CrewSlots,
   HardwareEvent,
-  LocalOverrideTask,
+  InterstitialTask,
   MissionActivity,
+  MissionLevel,
   MissionState,
+  PushCornersInterstitial,
   ReactorProfile,
   Station,
-  StreamDeckHitOverride,
+  StreamDeckHitInterstitial,
   StreamDeckKey,
   StreamDeckRouteTask,
   StreamDeckSequenceTask,
@@ -35,7 +37,10 @@ export type MissionPhaseView =
   | { kind: "countdown"; endsAt: number }
   | {
       kind: "playing";
-      endsAt: number;
+      level: MissionLevel;
+      levelObjectivesCompleted: number;
+      levelObjectiveTarget: number;
+      activeControls: ActiveControlsView;
       score: number;
       integrity: number;
       combo: number;
@@ -46,6 +51,12 @@ export type MissionPhaseView =
       reason: "survived" | "integrity";
       score: number;
     };
+
+export type ActiveControlsView = {
+  streamDeckColumns: number;
+  uf8Channels: number;
+  pushGridSize: number;
+};
 
 type DirectiveBase = {
   id: string;
@@ -59,9 +70,15 @@ export type OrderDirective = DirectiveBase & {
   prompt: string;
 };
 
-export type LocalOverrideDirective = DirectiveBase & {
-  kind: "local-override";
+export type InterstitialDirective = DirectiveBase & {
+  kind: "interstitial";
   station: Station;
+  prompt: string;
+};
+
+export type InterstitialSupportDirective = DirectiveBase & {
+  kind: "interstitial-support";
+  focusStation: Station;
   prompt: string;
 };
 
@@ -84,7 +101,8 @@ export type ReactorSupportDirective = DirectiveBase & {
 
 export type PhoneDirective =
   | OrderDirective
-  | LocalOverrideDirective
+  | InterstitialDirective
+  | InterstitialSupportDirective
   | ReactorManualDirective
   | ReactorOperatorDirective
   | ReactorSupportDirective;
@@ -152,16 +170,18 @@ export type ServerMessage =
 
 export type StreamDeckStateView = {
   keys: readonly StreamDeckKey[];
+  activeColumns: number;
   task:
     | StreamDeckRouteTask
     | StreamDeckSequenceTask
-    | StreamDeckHitOverride
+    | StreamDeckHitInterstitial
     | null;
 };
 
 export type PushStateView = {
   phase: MissionPhaseView;
-  task: ActivePushTask | null;
+  activeGridSize: number;
+  task: ActivePushTask | PushCornersInterstitial | null;
 };
 
 export function publicDirectiveForStation(
@@ -180,20 +200,26 @@ export function publicDirectiveForStation(
         prompt: describeTask(task, mission.streamDeckKeys),
       };
     }
-    case "local-overrides": {
-      const task = mission.activity.tasks.find(
-        (candidate) => candidate.station === station,
-      );
-      if (task === undefined) {
-        throw new Error(`Missing local override for ${station}`);
-      }
-      return {
-        kind: "local-override",
+    case "interstitial": {
+      const task = mission.activity.task;
+      const base = {
         id: task.id,
         startedAt: task.startedAt,
         deadlineAt: task.deadlineAt,
+      };
+      if (task.station !== station) {
+        return {
+          ...base,
+          kind: "interstitial-support",
+          focusStation: task.station,
+          prompt: `BACK UP THE ${stationDisplayName(task.station)} OPERATOR`,
+        };
+      }
+      return {
+        ...base,
+        kind: "interstitial",
         station,
-        prompt: localOverridePrompt(task, mission.streamDeckKeys),
+        prompt: interstitialPrompt(task, mission.streamDeckKeys),
       };
     }
     case "reactor-procedure": {
@@ -228,8 +254,8 @@ export function publicDirectiveForStation(
   }
 }
 
-function localOverridePrompt(
-  task: LocalOverrideTask,
+function interstitialPrompt(
+  task: InterstitialTask,
   keys: readonly StreamDeckKey[],
 ): string {
   switch (task.kind) {
@@ -241,9 +267,20 @@ function localOverridePrompt(
       return `HIT ${key.label}!`;
     }
     case "uf8-bottom-out":
-      return "BOTTOM OUT!";
+      return `BOTTOM OUT ${task.channelCount} FADERS!`;
     case "push-corners":
       return "CORNERS!";
+  }
+}
+
+function stationDisplayName(station: Station): string {
+  switch (station) {
+    case "streamdeck":
+      return "DECK";
+    case "uf8":
+      return "UF8";
+    case "push":
+      return "PUSH";
   }
 }
 
@@ -400,8 +437,13 @@ function isPhoneDirective(value: unknown): value is PhoneDirective {
   switch (value.kind) {
     case "order":
       return isStation(value["target"]) && typeof value["prompt"] === "string";
-    case "local-override":
+    case "interstitial":
       return isStation(value["station"]) && typeof value["prompt"] === "string";
+    case "interstitial-support":
+      return (
+        isStation(value["focusStation"]) &&
+        typeof value["prompt"] === "string"
+      );
     case "reactor-manual":
       return value["target"] === "uf8" && isReactorProfiles(value["profiles"]);
     case "reactor-operator":
@@ -466,13 +508,16 @@ function isPhase(value: unknown): value is MissionPhaseView {
       return typeof value.endsAt === "number";
     case "playing":
       return (
-        typeof value.endsAt === "number" &&
+        isIntegerInRange(value["level"], 1, 5) &&
+        isIntegerInRange(value["levelObjectivesCompleted"], 0, 8) &&
+        isIntegerInRange(value["levelObjectiveTarget"], 1, 8) &&
+        isActiveControlsView(value["activeControls"]) &&
         typeof value.score === "number" &&
         typeof value.integrity === "number" &&
         typeof value.combo === "number" &&
         isOneOf(value["activity"], [
           "orders",
-          "local-overrides",
+          "interstitial",
           "reactor-procedure",
         ])
       );
@@ -484,6 +529,15 @@ function isPhase(value: unknown): value is MissionPhaseView {
     default:
       return false;
   }
+}
+
+function isActiveControlsView(value: unknown): value is ActiveControlsView {
+  return (
+    isRecord(value) &&
+    isIntegerInRange(value["streamDeckColumns"], 0, 8) &&
+    isIntegerInRange(value["uf8Channels"], 0, 8) &&
+    isIntegerInRange(value["pushGridSize"], 0, 8)
+  );
 }
 
 function isStation(value: unknown): value is Station {
@@ -576,6 +630,14 @@ type JsonRecord = {
   score?: unknown;
   integrity?: unknown;
   combo?: unknown;
+  level?: unknown;
+  levelObjectivesCompleted?: unknown;
+  levelObjectiveTarget?: unknown;
+  activeControls?: unknown;
+  streamDeckColumns?: unknown;
+  uf8Channels?: unknown;
+  pushGridSize?: unknown;
+  focusStation?: unknown;
   reason?: unknown;
   [key: string]: unknown;
 };

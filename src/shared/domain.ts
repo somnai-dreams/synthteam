@@ -6,6 +6,138 @@ export type MissionStations =
   | readonly [Station, Station]
   | readonly [Station, Station, Station];
 
+export const MISSION_LEVELS = [1, 2, 3, 4, 5] as const;
+
+export type MissionLevel = (typeof MISSION_LEVELS)[number];
+
+export type MissionLevelProfile = {
+  level: MissionLevel;
+  objectiveTarget: number;
+  streamDeckColumns: number;
+  uf8Channels: number;
+  pushGridSize: number;
+  streamDeckSequenceChance: number;
+  pushDefendChance: number;
+  pushPathLength: number;
+  taskDurationMs: number;
+  uf8Tolerance: number;
+  uf8HoldMs: number;
+  pushDefendSpeed: number;
+  pushDefendSpawnIntervalMs: number;
+};
+
+export const MISSION_LEVEL_PROFILES = [
+  {
+    level: 1,
+    objectiveTarget: 3,
+    streamDeckColumns: 2,
+    uf8Channels: 2,
+    pushGridSize: 3,
+    streamDeckSequenceChance: 0,
+    pushDefendChance: 0,
+    pushPathLength: 3,
+    taskDurationMs: 15_000,
+    uf8Tolerance: 4,
+    uf8HoldMs: 350,
+    pushDefendSpeed: 1.4,
+    pushDefendSpawnIntervalMs: 1_300,
+  },
+  {
+    level: 2,
+    objectiveTarget: 4,
+    streamDeckColumns: 3,
+    uf8Channels: 3,
+    pushGridSize: 4,
+    streamDeckSequenceChance: 0.25,
+    pushDefendChance: 0,
+    pushPathLength: 3,
+    taskDurationMs: 14_000,
+    uf8Tolerance: 4,
+    uf8HoldMs: 400,
+    pushDefendSpeed: 1.4,
+    pushDefendSpawnIntervalMs: 1_300,
+  },
+  {
+    level: 3,
+    objectiveTarget: 5,
+    streamDeckColumns: 4,
+    uf8Channels: 4,
+    pushGridSize: 6,
+    streamDeckSequenceChance: 0.4,
+    pushDefendChance: 0,
+    pushPathLength: 4,
+    taskDurationMs: 13_000,
+    uf8Tolerance: 3,
+    uf8HoldMs: 450,
+    pushDefendSpeed: 1.4,
+    pushDefendSpawnIntervalMs: 1_300,
+  },
+  {
+    level: 4,
+    objectiveTarget: 6,
+    streamDeckColumns: 6,
+    uf8Channels: 6,
+    pushGridSize: 8,
+    streamDeckSequenceChance: 0.5,
+    pushDefendChance: 0.2,
+    pushPathLength: 5,
+    taskDurationMs: 12_000,
+    uf8Tolerance: 3,
+    uf8HoldMs: 500,
+    pushDefendSpeed: 2.4,
+    pushDefendSpawnIntervalMs: 900,
+  },
+  {
+    level: 5,
+    objectiveTarget: 8,
+    streamDeckColumns: 8,
+    uf8Channels: 8,
+    pushGridSize: 8,
+    streamDeckSequenceChance: 0.6,
+    pushDefendChance: 0.35,
+    pushPathLength: 6,
+    taskDurationMs: 11_000,
+    uf8Tolerance: 2,
+    uf8HoldMs: 600,
+    pushDefendSpeed: 3.2,
+    pushDefendSpawnIntervalMs: 550,
+  },
+] as const satisfies readonly MissionLevelProfile[];
+
+export function missionLevelProfile(level: MissionLevel): MissionLevelProfile {
+  const profile = MISSION_LEVEL_PROFILES[level - 1];
+  if (profile === undefined || profile.level !== level) {
+    throw new Error(`Mission level ${level} has no difficulty profile`);
+  }
+  return profile;
+}
+
+export function isActiveStreamDeckKey(
+  profile: MissionLevelProfile,
+  keyIndex: number,
+): boolean {
+  return keyIndex >= 0 && keyIndex < 32 && keyIndex % 8 < profile.streamDeckColumns;
+}
+
+export function isActiveUf8Channel(
+  profile: MissionLevelProfile,
+  channel: number,
+): boolean {
+  return channel >= 0 && channel < profile.uf8Channels;
+}
+
+export function isActivePushPoint(
+  profile: MissionLevelProfile,
+  point: GridPoint,
+): boolean {
+  return (
+    point.x >= 0 &&
+    point.x < profile.pushGridSize &&
+    point.y >= 0 &&
+    point.y < profile.pushGridSize
+  );
+}
+
 export type CrewConnection =
   | { kind: "connected" }
   | { kind: "reserved"; endsAt: number };
@@ -170,51 +302,51 @@ export type ActiveTask =
   | PushPathTask
   | PushDefendTask;
 
-export type OrdersBeat = "opening" | "pressure" | "final";
-
 export type OrdersActivity = {
   kind: "orders";
-  beat: OrdersBeat;
   startedAt: number;
-  endsAt: number;
   tasks: ActiveTask[];
 };
 
-type LocalOverrideBase = {
+type InterstitialTaskBase = {
   id: string;
   startedAt: number;
   deadlineAt: number;
   completed: boolean;
 };
 
-export type StreamDeckHitOverride = LocalOverrideBase & {
+export type StreamDeckHitInterstitial = InterstitialTaskBase & {
   kind: "streamdeck-hit";
   station: "streamdeck";
   keyIndex: number;
 };
 
-export type Uf8BottomOutOverride = LocalOverrideBase & {
+export type Uf8BottomOutInterstitial = InterstitialTaskBase & {
   kind: "uf8-bottom-out";
   station: "uf8";
+  channelCount: number;
   threshold: number;
 };
 
-export type PushCornersOverride = LocalOverrideBase & {
+export type PushCornersInterstitial = InterstitialTaskBase & {
   kind: "push-corners";
   station: "push";
+  gridSize: number;
   pressed: GridPoint[];
 };
 
-export type LocalOverrideTask =
-  | StreamDeckHitOverride
-  | Uf8BottomOutOverride
-  | PushCornersOverride;
+export type InterstitialTask =
+  | StreamDeckHitInterstitial
+  | Uf8BottomOutInterstitial
+  | PushCornersInterstitial;
 
-export type LocalOverridesActivity = {
-  kind: "local-overrides";
+export type InterstitialActivity = {
+  kind: "interstitial";
   startedAt: number;
   endsAt: number;
-  tasks: LocalOverrideTask[];
+  completedLevel: MissionLevel;
+  nextLevel: MissionLevel;
+  task: InterstitialTask;
 };
 
 export type ReactorProcedure = {
@@ -237,7 +369,7 @@ export type ReactorProcedureActivity = {
 
 export type MissionActivity =
   | OrdersActivity
-  | LocalOverridesActivity
+  | InterstitialActivity
   | ReactorProcedureActivity;
 
 export type StreamDeckHardwareEvent = {
@@ -271,8 +403,9 @@ export type HardwareEvent =
 
 export type MissionState = {
   startedAt: number;
-  endsAt: number;
   stations: MissionStations;
+  level: MissionLevel;
+  levelObjectivesCompleted: number;
   score: number;
   integrity: number;
   combo: number;
@@ -306,13 +439,21 @@ export type MissionOutcome =
       activity: MissionActivity["kind"];
     }
   | {
-      kind: "local-override-completed";
+      kind: "level-completed";
+      level: MissionLevel;
+    }
+  | {
+      kind: "level-started";
+      level: MissionLevel;
+    }
+  | {
+      kind: "interstitial-completed";
       taskId: string;
       station: Station;
       points: number;
     }
   | {
-      kind: "local-override-expired";
+      kind: "interstitial-expired";
       taskId: string;
       station: Station;
     }

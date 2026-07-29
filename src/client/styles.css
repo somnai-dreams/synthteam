@@ -615,7 +615,7 @@ small {
   text-align: center;
 }
 
-.phone-shell.mode-local-overrides {
+.phone-shell.mode-interstitial {
   --station: var(--green);
   background-image: radial-gradient(
     circle at 50% 42%,
@@ -639,6 +639,22 @@ small {
     0 0 0 1px rgba(130, 235, 146, 0.42),
     0 24px 60px rgba(0, 0, 0, 0.38),
     0 0 44px rgba(130, 235, 146, 0.08);
+}
+
+.directive-support {
+  background: color-mix(in srgb, var(--green) 4%, var(--panel-raised));
+  box-shadow:
+    0 0 0 1px rgba(130, 235, 146, 0.2),
+    0 24px 60px rgba(0, 0, 0, 0.38);
+}
+
+.directive-support h2 {
+  display: grid;
+  min-height: 2.8em;
+  place-content: center;
+  color: #c6d1c8;
+  font-size: clamp(2.4rem, 12vw, 5.8rem);
+  text-align: center;
 }
 
 .directive-local h2 {
@@ -893,11 +909,11 @@ small {
   font-size: 0.72rem;
 }
 
-.activity-banner.mode-local-overrides {
+.activity-banner.mode-interstitial {
   box-shadow: 0 0 0 1px rgba(130, 235, 146, 0.34);
 }
 
-.activity-banner.mode-local-overrides strong {
+.activity-banner.mode-interstitial strong {
   color: var(--green);
 }
 
@@ -918,6 +934,11 @@ small {
 
 .task-overview.task-count-2 {
   grid-template-columns: repeat(2, 1fr);
+}
+
+.task-overview.task-count-1 {
+  max-width: 680px;
+  grid-template-columns: 1fr;
 }
 
 .task-card {
@@ -1060,7 +1081,7 @@ small {
   transition-duration: 120ms;
 }
 
-.deck-key:hover,
+.deck-key:hover:not(:disabled),
 .deck-key.is-armed {
   background: color-mix(in srgb, currentColor 14%, #151c20);
   color: var(--cyan);
@@ -1081,8 +1102,16 @@ small {
     0 0 18px rgba(130, 235, 146, 0.46);
 }
 
-.deck-key:active {
+.deck-key:active:not(:disabled) {
   scale: 0.96;
+}
+
+.deck-key.is-locked,
+.push-pad.is-locked {
+  background: #090d0f;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+  color: #364046;
+  cursor: not-allowed;
 }
 
 .deck-key.color-amber {
@@ -1125,6 +1154,11 @@ small {
   box-shadow: inset 0 0 0 1px rgba(255, 179, 64, 0.42);
 }
 
+.fader-strip.is-locked {
+  background: #090d0f;
+  opacity: 0.38;
+}
+
 .fader-strip span,
 .fader-strip small {
   color: var(--muted);
@@ -1160,7 +1194,7 @@ small {
   transition-duration: 100ms;
 }
 
-.push-pad:active {
+.push-pad:active:not(:disabled) {
   scale: 0.96;
 }
 

@@ -16,5 +16,9 @@ The bridge uses each action instance's row and column, so all 32 positions must
 contain the Synthteam action. A bundled profile will replace this manual step
 after it can be exported and verified with the physical XL.
 
+Synthteam begins with the first two columns active and unlocks more columns at
+each level. The plugin renders the remaining keys as `LOCKED` and does not
+forward their key events until the server activates them.
+
 The plugin runtime is the Node 24 environment supplied by Stream Deck. The
 plugin itself is dependency-free and the rest of Synthteam runs on Bun.

@@ -78,8 +78,9 @@ attached UF8 while SSL 360 was stopped:
 - holding the normalized `-40 DB` stop completed a UF8 task for 100 points.
 
 The remaining hardware gates are the exported Stream Deck profile, identifying
-and integrating the disconnected Push, and completing a full 90-second
-no-simulator mission.
+and integrating the disconnected Push, and completing a full five-level
+no-simulator run. The original 90-second survival gate was replaced by
+objective-based level progression on 2026-07-29.
 
 Follow-up corrected the reset target to the surface's printed `0 dB` point:
 normalized `75%`, raw protocol position `24575`.

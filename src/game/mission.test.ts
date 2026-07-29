@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
   ActiveTask,
-  LocalOverrideTask,
+  InterstitialActivity,
   MissionState,
   MissionStations,
   OrdersActivity,
@@ -12,6 +12,7 @@ import type {
   Uf8FaderTask,
 } from "../shared/domain.ts";
 import {
+  missionLevelProfile,
   STATIONS,
   stationForTask,
   taskForReader,
@@ -41,6 +42,13 @@ function orders(mission: MissionState): OrdersActivity {
   return mission.activity;
 }
 
+function interstitial(mission: MissionState): InterstitialActivity {
+  if (mission.activity.kind !== "interstitial") {
+    throw new Error(`Expected interstitial, got ${mission.activity.kind}`);
+  }
+  return mission.activity;
+}
+
 function procedure(mission: MissionState): ReactorProcedureActivity {
   if (mission.activity.kind !== "reactor-procedure") {
     throw new Error(`Expected procedure, got ${mission.activity.kind}`);
@@ -62,80 +70,229 @@ function taskOfKind<T extends ActiveTask["kind"]>(
   return task;
 }
 
-function overrideOfKind<T extends LocalOverrideTask["kind"]>(
-  mission: MissionState,
-  kind: T,
-): Extract<LocalOverrideTask, { kind: T }> {
-  if (mission.activity.kind !== "local-overrides") {
-    throw new Error(`Expected local overrides, got ${mission.activity.kind}`);
-  }
-  const task = mission.activity.tasks.find(
-    (candidate): candidate is Extract<LocalOverrideTask, { kind: T }> =>
-      candidate.kind === kind,
-  );
-  if (task === undefined) {
-    throw new Error(`Missing ${kind} override`);
-  }
-  return task;
-}
-
-function beginLocalOverrides(
+function completeStreamDeckOrder(
   mission: MissionState,
   dependencies: MissionDependencies,
-): void {
-  const update = advanceMission(mission, 19_000, dependencies);
-  expect(update.outcomes).toContainEqual({
-    kind: "activity-started",
-    activity: "local-overrides",
-  });
+  now: number,
+) {
+  const task = orders(mission).tasks.find(
+    (
+      candidate,
+    ): candidate is StreamDeckRouteTask | StreamDeckSequenceTask =>
+      candidate.kind === "streamdeck-route" ||
+      candidate.kind === "streamdeck-sequence",
+  );
+  if (task === undefined) {
+    throw new Error("Mission has no Stream Deck order");
+  }
+  switch (task.kind) {
+    case "streamdeck-route":
+      applyHardwareEvent(
+        mission,
+        {
+          kind: "streamdeck-key",
+          keyIndex: task.sourceKeyIndex,
+          phase: "down",
+        },
+        now,
+        dependencies,
+      );
+      return applyHardwareEvent(
+        mission,
+        {
+          kind: "streamdeck-key",
+          keyIndex: task.targetKeyIndex,
+          phase: "down",
+        },
+        now + 1,
+        dependencies,
+      );
+    case "streamdeck-sequence":
+      applyHardwareEvent(
+        mission,
+        {
+          kind: "streamdeck-key",
+          keyIndex: task.holdKeyIndex,
+          phase: "down",
+        },
+        now,
+        dependencies,
+      );
+      applyHardwareEvent(
+        mission,
+        {
+          kind: "streamdeck-key",
+          keyIndex: task.tapKeyIndex,
+          phase: "down",
+        },
+        now + 1,
+        dependencies,
+      );
+      return applyHardwareEvent(
+        mission,
+        {
+          kind: "streamdeck-key",
+          keyIndex: task.holdKeyIndex,
+          phase: "up",
+        },
+        now + 2,
+        dependencies,
+      );
+  }
 }
 
-function completeLocalOverrides(
+function completeInterstitial(
   mission: MissionState,
   dependencies: MissionDependencies,
   now: number,
 ): void {
-  const deck = overrideOfKind(mission, "streamdeck-hit");
-  applyHardwareEvent(
-    mission,
-    {
-      kind: "streamdeck-key",
-      keyIndex: deck.keyIndex,
-      phase: "down",
-    },
-    now,
-    dependencies,
-  );
-
-  applyHardwareEvent(
-    mission,
-    { kind: "uf8-fader", channel: 0, value: 0 },
-    now + 1,
-    dependencies,
-  );
-
-  for (const [index, point] of [
-    { x: 0, y: 0 },
-    { x: 7, y: 0 },
-    { x: 0, y: 7 },
-    { x: 7, y: 7 },
-  ].entries()) {
-    applyHardwareEvent(
-      mission,
-      { kind: "push-pad", point, phase: "down", velocity: 100 },
-      now + 2 + index,
-      dependencies,
-    );
+  const task = interstitial(mission).task;
+  switch (task.kind) {
+    case "streamdeck-hit":
+      applyHardwareEvent(
+        mission,
+        {
+          kind: "streamdeck-key",
+          keyIndex: task.keyIndex,
+          phase: "down",
+        },
+        now,
+        dependencies,
+      );
+      return;
+    case "uf8-bottom-out":
+      for (let channel = 0; channel < task.channelCount; channel += 1) {
+        applyHardwareEvent(
+          mission,
+          { kind: "uf8-fader", channel, value: 0 },
+          now + channel,
+          dependencies,
+        );
+        if (mission.activity.kind !== "interstitial") {
+          return;
+        }
+      }
+      return;
+    case "push-corners": {
+      const farEdge = task.gridSize - 1;
+      for (const [index, point] of [
+        { x: 0, y: 0 },
+        { x: farEdge, y: 0 },
+        { x: 0, y: farEdge },
+        { x: farEdge, y: farEdge },
+      ].entries()) {
+        applyHardwareEvent(
+          mission,
+          { kind: "push-pad", point, phase: "down", velocity: 100 },
+          now + index,
+          dependencies,
+        );
+      }
+      return;
+    }
   }
 }
 
-describe("mission creation", () => {
+function reachNextLevel(
+  mission: MissionState,
+  dependencies: MissionDependencies,
+  now: number,
+): void {
+  const currentLevel = mission.level;
+  const profile = missionLevelProfile(currentLevel);
+  mission.levelObjectivesCompleted = profile.objectiveTarget - 1;
+  completeStreamDeckOrder(mission, dependencies, now);
+  expect(mission.activity.kind).toBe("interstitial");
+  completeInterstitial(mission, dependencies, now + 100);
+  expect(Number(mission.level)).toBe(currentLevel + 1);
+  expect(mission.activity.kind).toBe("orders");
+}
+
+describe("mission level profiles", () => {
+  test("starts at level one with only the smallest control regions active", () => {
+    const mission = createMission(1_000, STATIONS, deterministicDependencies());
+    const profile = missionLevelProfile(mission.level);
+
+    expect(mission.level).toBe(1);
+    expect(mission.levelObjectivesCompleted).toBe(0);
+    expect(profile.streamDeckColumns).toBe(2);
+    expect(profile.uf8Channels).toBe(2);
+    expect(profile.pushGridSize).toBe(3);
+    expect(profile.objectiveTarget).toBe(3);
+  });
+
+  test("keeps every generated task inside each level's active controls", () => {
+    const dependencies = deterministicDependencies();
+    const mission = createMission(1_000, STATIONS, dependencies);
+
+    for (const level of [1, 2, 3, 4, 5] as const) {
+      expect(mission.level).toBe(level);
+      const profile = missionLevelProfile(level);
+      for (const task of orders(mission).tasks) {
+        switch (task.kind) {
+          case "streamdeck-route":
+            expect(task.sourceKeyIndex % 8).toBeLessThan(
+              profile.streamDeckColumns,
+            );
+            expect(task.targetKeyIndex % 8).toBeLessThan(
+              profile.streamDeckColumns,
+            );
+            break;
+          case "streamdeck-sequence":
+            expect(task.holdKeyIndex % 8).toBeLessThan(
+              profile.streamDeckColumns,
+            );
+            expect(task.tapKeyIndex % 8).toBeLessThan(
+              profile.streamDeckColumns,
+            );
+            break;
+          case "uf8-fader":
+            expect(task.channel).toBeLessThan(profile.uf8Channels);
+            break;
+          case "push-path":
+            expect(task.path).toHaveLength(profile.pushPathLength);
+            expect(
+              task.path.every(
+                (point) =>
+                  point.x < profile.pushGridSize &&
+                  point.y < profile.pushGridSize,
+              ),
+            ).toBe(true);
+            break;
+          case "push-defend":
+            expect(profile.pushGridSize).toBe(8);
+            break;
+        }
+      }
+      if (level < 5) {
+        reachNextLevel(mission, dependencies, 10_000 * level);
+      }
+    }
+  });
+
+  test("ignores input from locked controls without treating it as a mistake", () => {
+    const dependencies = deterministicDependencies();
+    const mission = createMission(1_000, STATIONS, dependencies);
+
+    const update = applyHardwareEvent(
+      mission,
+      { kind: "streamdeck-key", keyIndex: 7, phase: "down" },
+      2_000,
+      dependencies,
+    );
+
+    expect(update.outcomes).toEqual([]);
+    expect(mission.integrity).toBe(100);
+  });
+});
+
+describe("cross-routed orders", () => {
   test("creates one cross-routed order per reader", () => {
     const mission = createMission(1_000, STATIONS, deterministicDependencies());
     const activity = orders(mission);
 
     expect(activity.tasks).toHaveLength(3);
-    for (const reader of ["streamdeck", "uf8", "push"] as const) {
+    for (const reader of STATIONS) {
       expect(stationForTask(taskForReader(activity, reader))).not.toBe(reader);
     }
   });
@@ -149,135 +306,26 @@ describe("mission creation", () => {
     );
     const activity = orders(mission);
 
-    expect(mission.stations).toEqual(stations);
     expect(activity.tasks).toHaveLength(2);
     expect(stationForTask(taskForReader(activity, "streamdeck"))).toBe("uf8");
     expect(stationForTask(taskForReader(activity, "uf8"))).toBe("streamdeck");
-    expect(activity.tasks.some((task) => task.reader === "push")).toBe(false);
   });
 
-  test("ignores input from a controller outside the two-crew mission", () => {
-    const dependencies = deterministicDependencies();
-    const mission = createMission(
-      1_000,
-      ["streamdeck", "uf8"],
-      dependencies,
-    );
-
-    const update = applyHardwareEvent(
-      mission,
-      {
-        kind: "push-pad",
-        point: { x: 2, y: 2 },
-        phase: "down",
-        velocity: 100,
-      },
-      2_000,
-      dependencies,
-    );
-
-    expect(update.outcomes).toEqual([]);
-    expect(mission.integrity).toBe(100);
-  });
-
-  test("creates a complete 8 by 4 Stream Deck layout", () => {
-    const mission = createMission(1_000, STATIONS, deterministicDependencies());
-
-    expect(mission.streamDeckKeys).toHaveLength(32);
-    expect(new Set(mission.streamDeckKeys.map((key) => key.label)).size).toBe(
-      32,
-    );
-  });
-});
-
-describe("cross-routed orders", () => {
   test("completes a Stream Deck route in source-destination order", () => {
     const dependencies = deterministicDependencies(0.75);
     const mission = createMission(1_000, STATIONS, dependencies);
-    const task = taskOfKind(
-      orders(mission),
-      "streamdeck-route",
-    ) as StreamDeckRouteTask;
 
-    expect(
-      applyHardwareEvent(
-        mission,
-        {
-          kind: "streamdeck-key",
-          keyIndex: task.sourceKeyIndex,
-          phase: "down",
-        },
-        2_000,
-        dependencies,
-      ).outcomes,
-    ).toEqual([]);
-
-    const update = applyHardwareEvent(
-      mission,
-      {
-        kind: "streamdeck-key",
-        keyIndex: task.targetKeyIndex,
-        phase: "down",
-      },
-      2_100,
-      dependencies,
-    );
+    const update = completeStreamDeckOrder(mission, dependencies, 2_000);
 
     expect(update.outcomes[0]?.kind).toBe("completed");
     expect(mission.score).toBe(100);
-  });
-
-  test("requires hold, tap, and release for a Stream Deck sequence", () => {
-    const dependencies = deterministicDependencies(0.25);
-    const mission = createMission(1_000, STATIONS, dependencies);
-    const task = taskOfKind(
-      orders(mission),
-      "streamdeck-sequence",
-    ) as StreamDeckSequenceTask;
-
-    applyHardwareEvent(
-      mission,
-      {
-        kind: "streamdeck-key",
-        keyIndex: task.holdKeyIndex,
-        phase: "down",
-      },
-      2_000,
-      dependencies,
-    );
-    applyHardwareEvent(
-      mission,
-      {
-        kind: "streamdeck-key",
-        keyIndex: task.tapKeyIndex,
-        phase: "down",
-      },
-      2_010,
-      dependencies,
-    );
-    expect(task.progress).toBe(2);
-
-    const update = applyHardwareEvent(
-      mission,
-      {
-        kind: "streamdeck-key",
-        keyIndex: task.holdKeyIndex,
-        phase: "up",
-      },
-      2_020,
-      dependencies,
-    );
-
-    expect(update.outcomes[0]?.kind).toBe("completed");
+    expect(mission.levelObjectivesCompleted).toBe(1);
   });
 
   test("requires a UF8 fader to remain in tolerance", () => {
     const dependencies = deterministicDependencies();
     const mission = createMission(1_000, STATIONS, dependencies);
-    const task = taskOfKind(
-      orders(mission),
-      "uf8-fader",
-    ) as Uf8FaderTask;
+    const task = taskOfKind(orders(mission), "uf8-fader") as Uf8FaderTask;
 
     applyHardwareEvent(
       mission,
@@ -291,7 +339,7 @@ describe("cross-routed orders", () => {
     );
 
     expect(advanceMission(mission, 2_300, dependencies).outcomes).toEqual([]);
-    expect(advanceMission(mission, 2_500, dependencies).outcomes[0]?.kind).toBe(
+    expect(advanceMission(mission, 2_400, dependencies).outcomes[0]?.kind).toBe(
       "completed",
     );
   });
@@ -311,164 +359,132 @@ describe("cross-routed orders", () => {
         2_000 + index,
         dependencies,
       );
-      if (index < task.path.length - 1) {
-        expect(update.outcomes).toEqual([]);
-      } else {
-        expect(update.outcomes[0]?.kind).toBe("completed");
-      }
+      expect(update.outcomes).toHaveLength(
+        index === task.path.length - 1 ? 1 : 0,
+      );
     }
   });
 });
 
-describe("push defend activity", () => {
-  function defendDependencies(): MissionDependencies {
-    let nextId = 0;
-    return {
-      random: () => 0.9, // rolls the defend variant for the Push station
-      makeId: () => {
-        nextId += 1;
-        return `task-${nextId}`;
-      },
-    };
-  }
-
-  test("rolls a defend task with base parameters at mission start", () => {
-    const mission = createMission(1_000, STATIONS, defendDependencies());
-    const task = taskOfKind(orders(mission), "push-defend");
-
-    expect(task.missileSpeed).toBe(1.4);
-    expect(task.spawnIntervalMs).toBe(1_300);
-    expect(task.hull).toBe(8);
-  });
-
-  test("completes when the survival clock runs out", () => {
-    const dependencies = defendDependencies();
-    const mission = createMission(1_000, STATIONS, dependencies);
-    const task = taskOfKind(orders(mission), "push-defend");
-
-    const update = advanceMission(mission, task.deadlineAt, dependencies);
-
-    expect(
-      update.outcomes.some(
-        (outcome) => outcome.kind === "completed" && outcome.target === "push",
-      ),
-    ).toBe(true);
-    expect(mission.score).toBe(100);
-  });
-
-  test("a bridge failure report ends it like an expired order", () => {
-    const dependencies = defendDependencies();
-    const mission = createMission(1_000, STATIONS, dependencies);
-    const task = taskOfKind(orders(mission), "push-defend");
-
-    const update = applyHardwareEvent(
-      mission,
-      { kind: "push-defend-failed" },
-      2_000,
-      dependencies,
-    );
-
-    expect(update.outcomes[0]?.kind).toBe("expired");
-    expect(mission.integrity).toBe(88);
-    expect(taskOfKind(orders(mission), "push-defend").id).not.toBe(task.id);
-  });
-
-  test("replacement tasks get faster later in the mission", () => {
-    const dependencies = defendDependencies();
-    const mission = createMission(1_000, STATIONS, dependencies);
-
-    applyHardwareEvent(
-      mission,
-      { kind: "push-defend-failed" },
-      46_000, // halfway through the 90s mission
-      dependencies,
-    );
-
-    const replacement = taskOfKind(orders(mission), "push-defend");
-    expect(replacement.missileSpeed).toBe(2.3);
-    expect(replacement.spawnIntervalMs).toBe(925);
-  });
-});
-
-describe("mission rhythm", () => {
-  test("moves from shouted orders into simultaneous local overrides", () => {
+describe("level progression and interstitials", () => {
+  test("clears a quota into one focused six-second interstitial", () => {
     const dependencies = deterministicDependencies();
     const mission = createMission(1_000, STATIONS, dependencies);
+    mission.levelObjectivesCompleted = 2;
 
-    beginLocalOverrides(mission, dependencies);
+    const update = completeStreamDeckOrder(mission, dependencies, 2_000);
+    const activeInterstitial = interstitial(mission);
 
-    expect(mission.activity.kind).toBe("local-overrides");
-    if (mission.activity.kind !== "local-overrides") {
-      throw new Error("Expected local overrides");
-    }
-    expect(mission.activity.tasks.map((task) => task.station)).toEqual([
-      ...STATIONS,
-    ]);
+    expect(update.outcomes).toContainEqual({
+      kind: "level-completed",
+      level: 1,
+    });
+    expect(activeInterstitial.task.station).toBe("streamdeck");
+    expect(activeInterstitial.endsAt - activeInterstitial.startedAt).toBe(
+      6_000,
+    );
+    expect(mission.level).toBe(1);
   });
 
-  test("returns to orders as soon as every local override clears", () => {
+  test("successful interstitials award a bonus and unlock the next level", () => {
     const dependencies = deterministicDependencies();
     const mission = createMission(1_000, STATIONS, dependencies);
-    beginLocalOverrides(mission, dependencies);
+    mission.levelObjectivesCompleted = 2;
+    completeStreamDeckOrder(mission, dependencies, 2_000);
 
-    completeLocalOverrides(mission, dependencies, 19_100);
+    completeInterstitial(mission, dependencies, 2_100);
 
-    expect(mission.activity.kind).toBe("orders");
-    expect(orders(mission).beat).toBe("pressure");
+    expect(mission.level).toBe(2);
+    expect(mission.levelObjectivesCompleted).toBe(0);
     expect(mission.score).toBe(150);
   });
 
-  test("makes missed microgames cheap and continues the mission", () => {
+  test("missed interstitials apply a mild penalty but never block progression", () => {
     const dependencies = deterministicDependencies();
     const mission = createMission(1_000, STATIONS, dependencies);
-    beginLocalOverrides(mission, dependencies);
+    mission.levelObjectivesCompleted = 2;
+    completeStreamDeckOrder(mission, dependencies, 2_000);
+    const endsAt = interstitial(mission).endsAt;
 
-    const update = advanceMission(mission, 25_000, dependencies);
+    const update = advanceMission(mission, endsAt, dependencies);
 
-    expect(
-      update.outcomes.filter(
-        (outcome) => outcome.kind === "local-override-expired",
-      ),
-    ).toHaveLength(3);
-    expect(mission.integrity).toBe(91);
-    expect(orders(mission).beat).toBe("pressure");
+    expect(update.outcomes[0]?.kind).toBe("interstitial-expired");
+    expect(mission.integrity).toBe(97);
+    expect(mission.level).toBe(2);
   });
 
-  test("runs the shared reactor procedure before final orders", () => {
+  test("rotates solo interstitials across the connected stations", () => {
     const dependencies = deterministicDependencies();
     const mission = createMission(1_000, STATIONS, dependencies);
-    beginLocalOverrides(mission, dependencies);
-    completeLocalOverrides(mission, dependencies, 19_100);
-    advanceMission(mission, 37_105, dependencies);
-    const activeProcedure = procedure(mission);
-    const first = activeProcedure.procedure.profile.targets[0];
-    const second = activeProcedure.procedure.profile.targets[1];
+    const focusStations = [];
 
-    applyHardwareEvent(
-      mission,
-      {
-        kind: "uf8-fader",
-        channel: first.channel,
-        value: first.stop.value,
-      },
-      37_200,
-      dependencies,
-    );
-    applyHardwareEvent(
-      mission,
-      {
-        kind: "uf8-fader",
-        channel: second.channel,
-        value: second.stop.value,
-      },
-      37_210,
-      dependencies,
-    );
-    const update = advanceMission(mission, 37_900, dependencies);
+    for (let level = 1; level < 5; level += 1) {
+      mission.levelObjectivesCompleted =
+        missionLevelProfile(mission.level).objectiveTarget - 1;
+      completeStreamDeckOrder(mission, dependencies, 10_000 * level);
+      focusStations.push(interstitial(mission).task.station);
+      completeInterstitial(mission, dependencies, 10_000 * level + 100);
+    }
+
+    expect(focusStations).toEqual([
+      "streamdeck",
+      "uf8",
+      "push",
+      "streamdeck",
+    ]);
+  });
+
+  test("runs the reactor procedure as the level-five finale", () => {
+    const dependencies = deterministicDependencies();
+    const mission = createMission(1_000, STATIONS, dependencies);
+    reachNextLevel(mission, dependencies, 10_000);
+    reachNextLevel(mission, dependencies, 20_000);
+    reachNextLevel(mission, dependencies, 30_000);
+    reachNextLevel(mission, dependencies, 40_000);
+    mission.levelObjectivesCompleted = 7;
+    completeStreamDeckOrder(mission, dependencies, 50_000);
+    const activeProcedure = procedure(mission);
+
+    for (const [index, target] of activeProcedure.procedure.profile.targets.entries()) {
+      applyHardwareEvent(
+        mission,
+        {
+          kind: "uf8-fader",
+          channel: target.channel,
+          value: target.stop.value,
+        },
+        50_100 + index,
+        dependencies,
+      );
+    }
+    const update = advanceMission(mission, 50_800, dependencies);
 
     expect(update.outcomes[0]?.kind).toBe("procedure-completed");
-    expect(orders(mission).beat).toBe("final");
-    expect(mission.score).toBe(650);
+    expect(update.outcomes).toContainEqual({
+      kind: "mission-ended",
+      reason: "survived",
+    });
+  });
+
+  test("finishes level five directly when the two-person crew has no UF8", () => {
+    const dependencies = deterministicDependencies();
+    const mission = createMission(
+      1_000,
+      ["streamdeck", "push"],
+      dependencies,
+    );
+    reachNextLevel(mission, dependencies, 10_000);
+    reachNextLevel(mission, dependencies, 20_000);
+    reachNextLevel(mission, dependencies, 30_000);
+    reachNextLevel(mission, dependencies, 40_000);
+    mission.levelObjectivesCompleted = 7;
+
+    const update = completeStreamDeckOrder(mission, dependencies, 50_000);
+
+    expect(update.outcomes).toContainEqual({
+      kind: "mission-ended",
+      reason: "survived",
+    });
   });
 });
 
@@ -478,12 +494,26 @@ describe("mission pressure", () => {
     const mission = createMission(1_000, STATIONS, dependencies);
     const oldIds = orders(mission).tasks.map((task) => task.id);
 
-    const update = advanceMission(mission, 15_000, dependencies);
+    const update = advanceMission(mission, 20_000, dependencies);
 
     expect(
       update.outcomes.filter((outcome) => outcome.kind === "expired"),
     ).toHaveLength(3);
     expect(mission.integrity).toBe(64);
     expect(orders(mission).tasks.map((task) => task.id)).not.toEqual(oldIds);
+  });
+
+  test("introduces Push defend only once the full grid unlocks", () => {
+    const dependencies = deterministicDependencies(0.9);
+    const mission = createMission(1_000, STATIONS, dependencies);
+    reachNextLevel(mission, dependencies, 10_000);
+    reachNextLevel(mission, dependencies, 20_000);
+    reachNextLevel(mission, dependencies, 30_000);
+    const defend = taskOfKind(orders(mission), "push-defend");
+
+    expect(mission.level).toBe(4);
+    expect(defend.missileSpeed).toBe(2.4);
+    expect(defend.spawnIntervalMs).toBe(900);
+    expect(defend.hull).toBe(8);
   });
 });

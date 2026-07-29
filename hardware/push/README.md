@@ -10,13 +10,13 @@ The Push station has two kinds of activity, chosen by the server:
 - **Trace the vector** (`push-path`): the classic order — the path
   lights up on the pads (next pad white), the screen mirrors it on a
   mini grid with progress, score, combo, ship integrity, the mission
-  clock and the order deadline. Pad presses are forwarded to the
+  level progress and the order deadline. Pad presses are forwarded to the
   server, which validates the trace. A HULL BREACH flash takes over
   the screen whenever mission integrity drops.
 - **Defend the mothership** (`push-defend`): the server declares the
   activity with explicit difficulty parameters (`missileSpeed` in pads
-  per second, `spawnIntervalMs`, `hull`) that ramp as the mission
-  progresses. The bridge runs the minigame locally: the screen becomes
+  per second, `spawnIntervalMs`, `hull`) at the later full-grid levels.
+  The bridge runs the minigame locally: the screen becomes
   the underside of our alien saucer (yellow bottom hemisphere, glowing
   window rim), missiles climb the pad columns, and pressing a
   missile's pad intercepts it. Every missile that reaches the top
@@ -26,7 +26,11 @@ The Push station has two kinds of activity, chosen by the server:
   and the bridge sends `push-defend-failed`, which the server scores
   like an expired order.
 
-In the lobby the screen shows link status; game over shows the result.
+The server also sends the active grid size. The bridge lights only that
+bottom-left region, ignores pads outside it, and expands from 3×3 to the full
+8×8 as levels unlock. Between levels it can run the focused four-corners
+interstitial. In the lobby the screen shows link status; game over shows the
+result.
 
 Everything is JavaScript: `@julusian/midi` (RtMidi) for pads, buttons
 and LEDs, and the `usb` package's WebUSB-shaped API for the display.
@@ -56,7 +60,7 @@ bun bridge.js
 ```
 
 The bridge sends `{"type": "push-join"}`, receives `push-state`
-messages (mission phase + the active push-path task), and submits
+messages (mission phase, active grid size, and the active Push task), and submits
 `push-pad` hardware events. It reconnects automatically, so start
 order doesn't matter. Point it at a non-default server with
 `--server ws://host:port/ws`.

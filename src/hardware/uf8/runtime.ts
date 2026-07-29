@@ -26,6 +26,7 @@ import { Uf8Session } from "./session.ts";
 
 export type Uf8DisplayStrip = {
   label: string;
+  active: boolean;
   cue: {
     heading: string;
     value: string;
@@ -45,6 +46,7 @@ export type Uf8RuntimeCallbacks = {
 const RETRY_DELAY_MS = 2_000;
 const MOTOR_MOVE_MS = 650;
 const BACKGROUND = rgb565(3, 5, 9);
+const LOCKED_TEXT = rgb565(52, 61, 67);
 const WHITE = rgb565(255, 255, 255);
 const DISPLAY_COLOURS = [
   rgb565(255, 48, 88),
@@ -286,6 +288,34 @@ export function createUf8DisplayFrames(
     const accent = DISPLAY_COLOURS[index];
     if (strip === undefined || accent === undefined) {
       throw new Error(`UF8 display ${index} is missing its view`);
+    }
+    if (!strip.active) {
+      frames.push(
+        drawUf8DisplayBox(
+          index,
+          0,
+          0,
+          UF8_DISPLAY_WIDTH,
+          UF8_DISPLAY_HEIGHT,
+          BACKGROUND,
+        ),
+        setUf8DisplayColour(index, LOCKED_TEXT),
+        drawUf8DisplayText(
+          index,
+          4,
+          18,
+          strip.label,
+          "dejavu-sans-bold-14",
+        ),
+        drawUf8DisplayText(
+          index,
+          38,
+          88,
+          "LOCKED",
+          "dejavu-sans-bold-10",
+        ),
+      );
+      continue;
     }
     frames.push(
       drawUf8DisplayBox(

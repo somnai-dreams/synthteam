@@ -4,12 +4,12 @@ import type {
   CrewSlots,
   GridPoint,
   HardwareEvent,
-  LocalOverrideTask,
+  InterstitialTask,
   MissionActivity,
-  PushCornersOverride,
+  PushCornersInterstitial,
   PushPathTask,
   Station,
-  StreamDeckHitOverride,
+  StreamDeckHitInterstitial,
   StreamDeckRouteTask,
   StreamDeckSequenceTask,
   Uf8FaderTask,
@@ -318,17 +318,29 @@ function phoneDirectiveMarkup(directive: PhoneDirective): string {
         </div>
         <p class="phone-instruction">Do not perform this action yourself. Make the other operator hear you.</p>
       `;
-    case "local-override":
+    case "interstitial":
       return `
         <div class="order-card directive-card directive-local" data-directive-id="${directive.id}">
           <div class="order-kicker">
-            <span>LOCAL OVERRIDE</span>
+            <span>INTERSTITIAL</span>
             <strong>DO THIS YOURSELF</strong>
           </div>
           <h2>${escapeHtml(directive.prompt)}</h2>
           ${deadlineMarkup(directive)}
         </div>
         <p class="phone-instruction is-local">Use your own ${stationShortName(directive.station)} controls. Do not shout this order away.</p>
+      `;
+    case "interstitial-support":
+      return `
+        <div class="order-card directive-card directive-support" data-directive-id="${directive.id}">
+          <div class="order-kicker">
+            <span>LEVEL TRANSITION</span>
+            <strong>${stationShortName(directive.focusStation)} SOLO</strong>
+          </div>
+          <h2>${escapeHtml(directive.prompt)}</h2>
+          ${deadlineMarkup(directive)}
+        </div>
+        <p class="phone-instruction">This one belongs to the highlighted operator. The next level unlocks either way.</p>
       `;
     case "reactor-manual":
       return `
@@ -410,7 +422,12 @@ function renderConsole(): void {
     `;
     return;
   }
-  midiBridge?.syncActivity(snapshot.mission?.activity ?? null);
+  midiBridge?.syncActivity(
+    snapshot.mission?.activity ?? null,
+    snapshot.phase.kind === "playing"
+      ? snapshot.phase.activeControls.pushGridSize
+      : 0,
+  );
   app.innerHTML = consoleMarkup(snapshot);
   bindConsoleActions(snapshot);
 }
@@ -518,15 +535,15 @@ function activityOverviewMarkup(
   consoleSnapshot: ConsoleSnapshot,
 ): string {
   const mission = consoleSnapshot.mission;
-  if (mission === null) {
+  if (mission === null || consoleSnapshot.phase.kind !== "playing") {
     throw new Error("Activity overview requires an active mission");
   }
   switch (mission.activity.kind) {
     case "orders":
       return `
         <div class="activity-banner mode-orders">
-          <span>ORDERS</span>
-          <strong>SHOUT ACROSS THE CREW</strong>
+          <span>LEVEL ${consoleSnapshot.phase.level} · ORDERS</span>
+          <strong>${consoleSnapshot.phase.levelObjectivesCompleted}/${consoleSnapshot.phase.levelObjectiveTarget} OBJECTIVES CLEARED</strong>
         </div>
         <div class="task-overview task-count-${mission.activity.tasks.length}">
           ${mission.activity.tasks
@@ -534,14 +551,14 @@ function activityOverviewMarkup(
             .join("")}
         </div>
       `;
-    case "local-overrides":
+    case "interstitial":
       return `
-        <div class="activity-banner mode-local-overrides">
-          <span>LOCAL OVERRIDES</span>
-          <strong>EVERY OPERATOR ACTS ALONE</strong>
+        <div class="activity-banner mode-interstitial">
+          <span>LEVEL ${mission.activity.completedLevel} CLEAR</span>
+          <strong>${stationShortName(mission.activity.task.station)} SOLO → LEVEL ${mission.activity.nextLevel}</strong>
         </div>
-        <div class="task-overview task-count-${mission.activity.tasks.length}">
-          ${mission.activity.tasks.map(localOverrideCard).join("")}
+        <div class="task-overview task-count-1">
+          ${interstitialCard(mission.activity.task)}
         </div>
       `;
     case "reactor-procedure": {
@@ -549,7 +566,7 @@ function activityOverviewMarkup(
       const reader = consoleSnapshot.crew[procedure.reader];
       return `
         <div class="activity-banner mode-reactor-procedure">
-          <span>PROCEDURE</span>
+          <span>LEVEL 5 · FINAL PROCEDURE</span>
           <strong>REPORT → LOOK UP → CALIBRATE</strong>
         </div>
         <div class="procedure-overview">
@@ -571,7 +588,7 @@ function activityOverviewMarkup(
   }
 }
 
-function localOverrideCard(task: LocalOverrideTask): string {
+function interstitialCard(task: InterstitialTask): string {
   let prompt: string;
   let progress: string;
   switch (task.kind) {
@@ -581,7 +598,9 @@ function localOverrideCard(task: LocalOverrideTask): string {
       break;
     case "uf8-bottom-out":
       prompt = "BOTTOM OUT";
-      progress = task.completed ? "CLEARED" : "ALL FADERS TO −INF";
+      progress = task.completed
+        ? "CLEARED"
+        : `FIRST ${task.channelCount} FADERS TO −INF`;
       break;
     case "push-corners":
       prompt = "CORNERS";
@@ -618,13 +637,17 @@ function taskCard(task: ActiveTask, consoleSnapshot: ConsoleSnapshot): string {
 
 function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
   const mission = consoleSnapshot.mission;
-  if (mission === null) {
+  if (
+    mission === null ||
+    consoleSnapshot.phase.kind !== "playing" ||
+    consoleSnapshot.crew.streamdeck?.connection.kind !== "connected"
+  ) {
     return "";
   }
   let active:
     | StreamDeckRouteTask
     | StreamDeckSequenceTask
-    | StreamDeckHitOverride
+    | StreamDeckHitInterstitial
     | null = null;
   switch (mission.activity.kind) {
     case "orders":
@@ -637,31 +660,32 @@ function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
             task.kind === "streamdeck-sequence",
         ) ?? null;
       break;
-    case "local-overrides":
+    case "interstitial":
       active =
-        mission.activity.tasks.find(
-          (task): task is StreamDeckHitOverride =>
-            task.kind === "streamdeck-hit",
-        ) ?? null;
+        mission.activity.task.kind === "streamdeck-hit"
+          ? mission.activity.task
+          : null;
       break;
     case "reactor-procedure":
       break;
   }
-  if (active === null) {
-    return "";
-  }
+  const activeColumns = consoleSnapshot.phase.activeControls.streamDeckColumns;
   return `
     <section class="sim-panel deck-panel">
       <header><span>01</span><strong>STREAM DECK</strong></header>
       <div class="deck-grid">
         ${mission.streamDeckKeys
           .map(
-            (key) => `
+            (key) => {
+              const locked = key.index % 8 >= activeColumns;
+              return `
               <button
-                class="deck-key color-${key.color} ${deckKeyState(active, key.index)}"
+                class="deck-key color-${key.color} ${locked ? "is-locked" : deckKeyState(active, key.index)}"
                 data-deck-key="${key.index}"
-              >${escapeHtml(key.label)}</button>
-            `,
+                ${locked ? "disabled" : ""}
+              >${locked ? "LOCKED" : escapeHtml(key.label)}</button>
+            `;
+            },
           )
           .join("")}
       </div>
@@ -670,9 +694,16 @@ function streamDeckSimulator(consoleSnapshot: ConsoleSnapshot): string {
 }
 
 function deckKeyState(
-  task: StreamDeckRouteTask | StreamDeckSequenceTask | StreamDeckHitOverride,
+  task:
+    | StreamDeckRouteTask
+    | StreamDeckSequenceTask
+    | StreamDeckHitInterstitial
+    | null,
   keyIndex: number,
 ): string {
+  if (task === null) {
+    return "";
+  }
   switch (task.kind) {
     case "streamdeck-route":
       return keyIndex === task.sourceKeyIndex && task.progress === 1
@@ -692,7 +723,7 @@ function deckKeyState(
 
 function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
   const mission = consoleSnapshot.mission;
-  if (mission === null) {
+  if (mission === null || consoleSnapshot.phase.kind !== "playing") {
     return "";
   }
   if (
@@ -700,17 +731,19 @@ function uf8Simulator(consoleSnapshot: ConsoleSnapshot): string {
   ) {
     return "";
   }
+  const activeChannels = consoleSnapshot.phase.activeControls.uf8Channels;
   return `
     <section class="sim-panel uf8-panel">
       <header><span>02</span><strong>SSL UF8</strong></header>
       <div class="fader-bank">
         ${Array.from({ length: 8 }, (_, channel) => {
           const cue = uf8SimulatorCue(mission.activity, channel);
+          const locked = channel >= activeChannels;
           return `
-            <label class="fader-strip ${cue.isTarget ? "is-target" : ""}">
+            <label class="fader-strip ${locked ? "is-locked" : cue.isTarget ? "is-target" : ""}">
               <span>CH ${channel + 1}</span>
-              <input data-uf8-fader="${channel}" type="range" min="0" max="100" value="${Math.round(consoleSnapshot.uf8Faders[channel] ?? 0)}" orient="vertical" />
-              <small>${escapeHtml(cue.label)}</small>
+              <input data-uf8-fader="${channel}" type="range" min="0" max="100" value="${Math.round(consoleSnapshot.uf8Faders[channel] ?? 0)}" orient="vertical" ${locked ? "disabled" : ""} />
+              <small>${locked ? "LOCKED" : escapeHtml(cue.label)}</small>
             </label>
           `;
         }).join("")}
@@ -734,8 +767,11 @@ function uf8SimulatorCue(
       }
       return { isTarget: true, label: task.label };
     }
-    case "local-overrides":
-      return { isTarget: true, label: "TO −INF" };
+    case "interstitial":
+      return activity.task.kind === "uf8-bottom-out" &&
+        channel < activity.task.channelCount
+        ? { isTarget: true, label: "TO −INF" }
+        : { isTarget: false, label: "—" };
     case "reactor-procedure": {
       const target = activity.procedure.profile.targets.find(
         (candidate) => candidate.channel === channel,
@@ -752,10 +788,14 @@ function uf8SimulatorCue(
 
 function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
   const mission = consoleSnapshot.mission;
-  if (mission === null) {
+  if (
+    mission === null ||
+    consoleSnapshot.phase.kind !== "playing" ||
+    consoleSnapshot.crew.push?.connection.kind !== "connected"
+  ) {
     return "";
   }
-  let active: PushPathTask | PushCornersOverride | null = null;
+  let active: PushPathTask | PushCornersInterstitial | null = null;
   switch (mission.activity.kind) {
     case "orders":
       active =
@@ -763,27 +803,26 @@ function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
           (task): task is PushPathTask => task.kind === "push-path",
         ) ?? null;
       break;
-    case "local-overrides":
+    case "interstitial":
       active =
-        mission.activity.tasks.find(
-          (task): task is PushCornersOverride =>
-            task.kind === "push-corners",
-        ) ?? null;
+        mission.activity.task.kind === "push-corners"
+          ? mission.activity.task
+          : null;
       break;
     case "reactor-procedure":
       break;
   }
-  if (active === null) {
-    return "";
-  }
+  const activeGridSize = consoleSnapshot.phase.activeControls.pushGridSize;
   return `
     <section class="sim-panel push-panel">
       <header><span>03</span><strong>ABLETON PUSH</strong></header>
       <div class="push-grid">
         ${gridPoints()
           .map((point) => {
-            const state = pushPadState(active, point);
-            return `<button class="push-pad ${state}" data-push-x="${point.x}" data-push-y="${point.y}" aria-label="Push pad ${point.x + 1}, ${point.y + 1}"></button>`;
+            const locked =
+              point.x >= activeGridSize || point.y >= activeGridSize;
+            const state = locked ? "is-locked" : pushPadState(active, point);
+            return `<button class="push-pad ${state}" data-push-x="${point.x}" data-push-y="${point.y}" aria-label="Push pad ${point.x + 1}, ${point.y + 1}" ${locked ? "disabled" : ""}></button>`;
           })
           .join("")}
       </div>
@@ -792,9 +831,12 @@ function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
 }
 
 function pushPadState(
-  task: PushPathTask | PushCornersOverride,
+  task: PushPathTask | PushCornersInterstitial | null,
   point: GridPoint,
 ): string {
+  if (task === null) {
+    return "";
+  }
   switch (task.kind) {
     case "push-path": {
       const pathIndex = task.path.findIndex(
@@ -811,9 +853,10 @@ function pushPadState(
         : `is-path color-${task.color}`;
     }
     case "push-corners": {
+      const farEdge = task.gridSize - 1;
       const isCorner =
-        (point.x === 0 || point.x === 7) &&
-        (point.y === 0 || point.y === 7);
+        (point.x === 0 || point.x === farEdge) &&
+        (point.y === 0 || point.y === farEdge);
       if (!isCorner) {
         return "";
       }
@@ -1087,10 +1130,10 @@ function midiOptions(
 function missionMeterMarkup(phase: Extract<MissionPhaseView, { kind: "playing" }>): string {
   return `
     <div class="mission-meter">
-      <div><span>TIME</span><strong data-mission-end="${phase.endsAt}">01:30</strong></div>
+      <div><span>LEVEL</span><strong>${phase.level}/5</strong></div>
+      <div><span>CLEARED</span><strong>${phase.levelObjectivesCompleted}/${phase.levelObjectiveTarget}</strong></div>
       <div class="integrity"><span>INTEGRITY</span><strong>${Math.round(phase.integrity)}%</strong></div>
-      <div><span>SCORE</span><strong>${phase.score.toLocaleString()}</strong></div>
-      <div><span>COMBO</span><strong>×${phase.combo}</strong></div>
+      <div><span>SCORE · COMBO</span><strong>${phase.score.toLocaleString()} · ×${phase.combo}</strong></div>
     </div>
   `;
 }
@@ -1183,11 +1226,6 @@ function updateLiveNumbers(): void {
   for (const element of document.querySelectorAll<HTMLElement>("[data-countdown]")) {
     const endsAt = Number(element.dataset["countdown"]);
     element.textContent = String(Math.max(1, Math.ceil((endsAt - now) / 1_000)));
-  }
-  for (const element of document.querySelectorAll<HTMLElement>("[data-mission-end]")) {
-    const endsAt = Number(element.dataset["missionEnd"]);
-    const remainingSeconds = Math.max(0, Math.ceil((endsAt - now) / 1_000));
-    element.textContent = `${String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:${String(remainingSeconds % 60).padStart(2, "0")}`;
   }
   for (const element of document.querySelectorAll<HTMLElement>("[data-deadline]")) {
     const deadline = Number(element.dataset["deadline"]);

@@ -27,6 +27,7 @@ import type {
   Uf8FaderValues,
 } from "../shared/domain.ts";
 import {
+  missionLevelProfile,
   UF8_CONTROL_LABELS,
   UF8_ZERO_FADER_STOP,
 } from "../shared/domain.ts";
@@ -389,21 +390,27 @@ function recordOutcomes(outcomes: readonly MissionOutcome[]): void {
           case "orders":
             addActivity("Cross-channel orders resumed", "neutral");
             break;
-          case "local-overrides":
-            addActivity("Local overrides — act alone", "neutral");
+          case "interstitial":
+            addActivity("Interstitial — one operator acts alone", "neutral");
             break;
           case "reactor-procedure":
             addActivity("Reactor procedure active", "danger");
             break;
         }
         break;
-      case "local-override-completed":
+      case "level-completed":
+        addActivity(`Level ${outcome.level} cleared`, "success");
+        break;
+      case "level-started":
+        addActivity(`Level ${outcome.level} systems unlocked`, "neutral");
+        break;
+      case "interstitial-completed":
         addActivity(
           `${stationName(outcome.station)} override cleared · +${outcome.points}`,
           "success",
         );
         break;
-      case "local-override-expired":
+      case "interstitial-expired":
         addActivity(
           `${stationName(outcome.station)} override missed`,
           "danger",
@@ -510,23 +517,37 @@ function snapshotFor(
 }
 
 function syncUf8Display(): void {
+  const activeChannelCount =
+    game.kind === "playing"
+      ? missionLevelProfile(game.mission.level).uf8Channels
+      : UF8_CONTROL_LABELS.length;
   const view: Uf8DisplayView = {
     scene: uf8DisplayScene(),
-    strips: UF8_CONTROL_LABELS.map((label) => ({
+    strips: UF8_CONTROL_LABELS.map((label, channel) => ({
       label,
+      active: channel < activeChannelCount,
       cue: null,
     })),
   };
   if (game.kind === "playing") {
     switch (game.mission.activity.kind) {
       case "orders":
+        if (view.strips[0] === undefined) {
+          throw new Error("UF8 level display is missing");
+        }
+        view.strips[0].cue = {
+          heading: "LEVEL",
+          value: String(game.mission.level),
+        };
         break;
-      case "local-overrides": {
-        const override = game.mission.activity.tasks.find(
-          (task) => task.kind === "uf8-bottom-out",
-        );
-        if (override !== undefined) {
-          for (const strip of view.strips) {
+      case "interstitial": {
+        const override = game.mission.activity.task;
+        if (override.kind === "uf8-bottom-out") {
+          for (let channel = 0; channel < override.channelCount; channel += 1) {
+            const strip = view.strips[channel];
+            if (strip === undefined) {
+              throw new Error("UF8 interstitial display is missing");
+            }
             strip.cue = { heading: "LOCAL", value: "DOWN!" };
           }
         }
@@ -566,7 +587,7 @@ function uf8DisplayScene(): Uf8DisplayView["scene"] {
 
 function streamDeckState() {
   if (game.kind !== "playing") {
-    return { keys: [], task: null };
+    return { keys: [], activeColumns: 0, task: null };
   }
   let task = null;
   switch (game.mission.activity.kind) {
@@ -578,34 +599,50 @@ function streamDeckState() {
             candidate.kind === "streamdeck-sequence",
         ) ?? null;
       break;
-    case "local-overrides":
+    case "interstitial":
       task =
-        game.mission.activity.tasks.find(
-          (candidate) => candidate.kind === "streamdeck-hit",
-        ) ?? null;
+        game.mission.activity.task.kind === "streamdeck-hit"
+          ? game.mission.activity.task
+          : null;
       break;
     case "reactor-procedure":
       break;
   }
   return {
     keys: game.mission.streamDeckKeys,
+    activeColumns: missionLevelProfile(game.mission.level).streamDeckColumns,
     task: task ?? null,
   };
 }
 
 function pushState(): PushStateView {
   if (game.kind !== "playing") {
-    return { phase: phaseView(), task: null };
+    return { phase: phaseView(), activeGridSize: 0, task: null };
   }
-  const task =
-    game.mission.activity.kind === "orders"
-      ? game.mission.activity.tasks.find(
+  let task: PushStateView["task"] = null;
+  switch (game.mission.activity.kind) {
+    case "orders":
+      task =
+        game.mission.activity.tasks.find(
           (candidate): candidate is ActivePushTask =>
             candidate.kind === "push-path" ||
             candidate.kind === "push-defend",
-        )
-      : undefined;
-  return { phase: phaseView(), task: task ?? null };
+        ) ?? null;
+      break;
+    case "interstitial":
+      task =
+        game.mission.activity.task.kind === "push-corners"
+          ? game.mission.activity.task
+          : null;
+      break;
+    case "reactor-procedure":
+      break;
+  }
+  return {
+    phase: phaseView(),
+    activeGridSize: missionLevelProfile(game.mission.level).pushGridSize,
+    task,
+  };
 }
 
 function phaseView(): MissionPhaseView {
@@ -615,9 +652,17 @@ function phaseView(): MissionPhaseView {
     case "countdown":
       return { kind: "countdown", endsAt: game.endsAt };
     case "playing":
+      const profile = missionLevelProfile(game.mission.level);
       return {
         kind: "playing",
-        endsAt: game.mission.endsAt,
+        level: game.mission.level,
+        levelObjectivesCompleted: game.mission.levelObjectivesCompleted,
+        levelObjectiveTarget: profile.objectiveTarget,
+        activeControls: {
+          streamDeckColumns: profile.streamDeckColumns,
+          uf8Channels: profile.uf8Channels,
+          pushGridSize: profile.pushGridSize,
+        },
         score: game.mission.score,
         integrity: game.mission.integrity,
         combo: game.mission.combo,
@@ -653,7 +698,7 @@ function canSubmitHardware(
     case "streamdeck":
       return eventKind === "streamdeck-key";
     case "push-bridge":
-      return eventKind === "push-pad";
+      return eventKind === "push-pad" || eventKind === "push-defend-failed";
     case "anonymous":
     case "phone":
       send(socket, {

@@ -56,28 +56,31 @@ button command.
 
 - There is one phone/crew slot per active controller.
 - A mission starts with either two or three connected phones.
+- Every run starts at Level 1. Clearing a level's objective quota unlocks the
+  next level automatically.
+- The active regions expand from 2 to 8 UF8 faders, 2 to 8 Stream Deck
+  columns, and a 3×3 to 8×8 Push grid. Locked controls stay dim and are ignored.
 - During Orders, the active stations form a routing cycle, so every reader
   receives an instruction for another crew member's controller.
-- Opening Orders transition into a six-second Local Override. Every active
-  player receives an unmistakably self-directed microgame for their own device.
-- Pressure Orders transition into a shared Reactor Procedure. The UF8 operator
-  reports a controller-visible code while another player's phone supplies the
-  four-row calibration manual.
-- Final Orders run until the 90-second mission ends.
+- Between levels, one rotating operator receives an unmistakably self-directed
+  six-second interstitial microgame for their own device.
+- Level 5 ends with a shared Reactor Procedure when UF8 is in the crew. The UF8
+  operator reports a controller-visible code while another player's phone
+  supplies the four-row calibration manual.
 - Completing an order scores points, raises the combo, and repairs a small
   amount of integrity.
 - A wrong discrete action costs a little integrity and resets that task's
   progress.
 - An expired order costs significant integrity and is immediately replaced.
-- Missed Local Overrides cost little integrity; a failed Reactor Procedure
-  costs more, but both return the mission to Orders instead of ending it.
-- The mission succeeds when time expires and fails when integrity reaches zero.
+- Missed interstitials cost little integrity and still unlock the next level.
+- The mission succeeds when the final level is cleared and fails when integrity
+  reaches zero.
 
 ## MVP gate
 
 The MVP is proven when either two or three players can join from phones and
-complete a 90-second mission using only their assigned physical devices without
-touching the central laptop after launch.
+complete a full five-level run using only their assigned physical devices
+without touching the central laptop after launch.
 
 ## Adapter boundary
 

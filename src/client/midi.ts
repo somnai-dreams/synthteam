@@ -1,7 +1,7 @@
 import type {
   HardwareEvent,
   MissionActivity,
-  PushCornersOverride,
+  PushCornersInterstitial,
   PushPathTask,
 } from "../shared/domain.ts";
 
@@ -35,7 +35,7 @@ type LearnState = PushLearnState | null;
 
 type PushLightCue =
   | { kind: "path"; task: PushPathTask }
-  | { kind: "corners"; task: PushCornersOverride };
+  | { kind: "corners"; task: PushCornersInterstitial };
 
 export type MidiBridgeView = {
   status: MidiStatus;
@@ -148,25 +148,37 @@ export class MidiBridge {
     this.#onChange();
   }
 
-  syncActivity(activity: MissionActivity | null): void {
+  syncActivity(activity: MissionActivity | null, activeGridSize: number): void {
     const cue = pushLightCue(activity);
     const grid = this.#configuration.pushGrid;
     const output = this.#pushOutput();
-    if (cue === null || grid === null || output === null) {
+    if (grid === null || output === null || activeGridSize === 0) {
       this.#clearPushLights();
       this.#lastPushSignature = "";
       return;
     }
-    const signature =
-      cue.kind === "path"
-        ? `${cue.task.id}:path:${cue.task.progress}:${output.id}`
-        : `${cue.task.id}:corners:${cue.task.pressed.length}:${output.id}`;
+    const cueSignature =
+      cue === null
+        ? "standby"
+        : cue.kind === "path"
+          ? `${cue.task.id}:path:${cue.task.progress}`
+          : `${cue.task.id}:corners:${cue.task.pressed.length}`;
+    const signature = `${activeGridSize}:${cueSignature}:${output.id}`;
     if (signature === this.#lastPushSignature) {
       return;
     }
     this.#clearPushLights();
-    const notes: number[] = [];
-    switch (cue.kind) {
+    const notes = new Map<number, number>();
+    for (let y = 0; y < activeGridSize; y += 1) {
+      for (let x = 0; x < activeGridSize; x += 1) {
+        const note =
+          grid.bottomLeftNote + x * grid.xStep + y * grid.yStep;
+        notes.set(note, 2);
+      }
+    }
+    switch (cue?.kind) {
+      case undefined:
+        break;
       case "path":
         for (let index = 0; index < cue.task.path.length; index += 1) {
           const point = cue.task.path[index];
@@ -181,16 +193,16 @@ export class MidiBridge {
               : index === cue.task.progress
                 ? 127
                 : 18;
-          output.send([0x90 | grid.midiChannel, note, velocity]);
-          notes.push(note);
+          notes.set(note, velocity);
         }
         break;
       case "corners":
+        const farEdge = cue.task.gridSize - 1;
         for (const point of [
           { x: 0, y: 0 },
-          { x: 7, y: 0 },
-          { x: 0, y: 7 },
-          { x: 7, y: 7 },
+          { x: farEdge, y: 0 },
+          { x: 0, y: farEdge },
+          { x: farEdge, y: farEdge },
         ]) {
           const note =
             grid.bottomLeftNote + point.x * grid.xStep + point.y * grid.yStep;
@@ -198,16 +210,14 @@ export class MidiBridge {
             (candidate) =>
               candidate.x === point.x && candidate.y === point.y,
           );
-          output.send([
-            0x90 | grid.midiChannel,
-            note,
-            pressed ? 2 : 127,
-          ]);
-          notes.push(note);
+          notes.set(note, pressed ? 2 : 127);
         }
         break;
     }
-    this.#litPushNotes = notes;
+    for (const [note, velocity] of notes) {
+      output.send([0x90 | grid.midiChannel, note, velocity]);
+    }
+    this.#litPushNotes = [...notes.keys()];
     this.#lastPushSignature = signature;
   }
 
@@ -400,12 +410,11 @@ function pushLightCue(activity: MissionActivity | null): PushLightCue | null {
       );
       return task === undefined ? null : { kind: "path", task };
     }
-    case "local-overrides": {
-      const task = activity.tasks.find(
-        (candidate): candidate is PushCornersOverride =>
-          candidate.kind === "push-corners",
-      );
-      return task === undefined ? null : { kind: "corners", task };
+    case "interstitial": {
+      const task = activity.task;
+      return task.kind === "push-corners"
+        ? { kind: "corners", task }
+        : null;
     }
     case "reactor-procedure":
       return null;

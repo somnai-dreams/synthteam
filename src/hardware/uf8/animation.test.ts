@@ -8,7 +8,7 @@ import {
 
 const emptyStrips: readonly Uf8AnimationStrip[] = Array.from(
   { length: 8 },
-  () => ({ cue: null }),
+  () => ({ active: true, cue: null }),
 );
 
 describe("UF8 full-screen animation scenes", () => {
@@ -53,7 +53,10 @@ describe("UF8 full-screen animation scenes", () => {
   test("keeps mission cues over the animated reactor field", () => {
     const strips = emptyStrips.map((strip, index) =>
       index === 2
-        ? { cue: { heading: "REPORT CODE", value: "BETA" } }
+        ? {
+            active: true,
+            cue: { heading: "REPORT CODE", value: "BETA" },
+          }
         : strip,
     );
     const messages = decode(

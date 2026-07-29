@@ -72,6 +72,7 @@ console.log("push bridge: hardware linked");
 let connected = false;
 let phase = { kind: "lobby" };
 let task = null;
+let activeGridSize = 0;
 let missionFlashUntil = 0; // full-screen breach flash (path mode only)
 let lastIntegrity = null;
 let socket = null;
@@ -81,7 +82,7 @@ const litPathPads = new Set();
 let defend = null;
 
 function initDefend(defendTask) {
-  lightPath(null);
+  clearPadGrid();
   defend = {
     taskId: defendTask.id,
     missiles: [],   // {col, y: float 0..8 climbing}
@@ -136,9 +137,10 @@ function connect() {
     connected = false;
     phase = { kind: "lobby" };
     task = null;
+    activeGridSize = 0;
     lastIntegrity = null;
     endDefend();
-    lightPath(null);
+    lightTask(null);
     setTimeout(connect, 1000);
   };
   socket.onerror = () => {};
@@ -162,6 +164,9 @@ push.on("pad", ({ x, y, down, velocity }) => {
     }
     return;
   }
+  if (x >= activeGridSize || y >= activeGridSize) {
+    return;
+  }
   socket.send(
     JSON.stringify({
       type: "hardware-event",
@@ -178,6 +183,7 @@ push.on("pad", ({ x, y, down, velocity }) => {
 function applyState(state) {
   phase = state.phase;
   task = state.task;
+  activeGridSize = state.activeGridSize;
 
   if (task?.kind === "push-defend" && phase.kind === "playing") {
     if (defend === null || defend.taskId !== task.id) {
@@ -199,22 +205,43 @@ function applyState(state) {
   lastIntegrity = integrity;
 
   if (defend === null) {
-    lightPath(task?.kind === "push-path" ? task : null);
+    lightTask(task);
   }
 }
 
-/** Light the remaining path in its color; the next expected pad is white. */
-function lightPath(pathTask) {
+/** Show the playable region, then overlay the current path or corner targets. */
+function lightTask(activeTask) {
   const wanted = new Map();
-  if (pathTask !== null) {
-    const [led] = PATH_COLORS[pathTask.color] ?? [PAD_COLORS.white];
-    pathTask.path.forEach((point, index) => {
-      if (index < pathTask.progress) {
+  for (let x = 0; x < activeGridSize; x++) {
+    for (let y = 0; y < activeGridSize; y++) {
+      wanted.set(y * 8 + x, PAD_COLORS.blue);
+    }
+  }
+  if (activeTask?.kind === "push-path") {
+    const [led] = PATH_COLORS[activeTask.color] ?? [PAD_COLORS.white];
+    activeTask.path.forEach((point, index) => {
+      if (index < activeTask.progress) {
         return; // already traced
       }
       const key = point.y * 8 + point.x;
-      wanted.set(key, index === pathTask.progress ? PAD_COLORS.white : led);
+      wanted.set(key, index === activeTask.progress ? PAD_COLORS.white : led);
     });
+  } else if (activeTask?.kind === "push-corners") {
+    const farEdge = activeTask.gridSize - 1;
+    for (const point of [
+      { x: 0, y: 0 },
+      { x: farEdge, y: 0 },
+      { x: 0, y: farEdge },
+      { x: farEdge, y: farEdge },
+    ]) {
+      const pressed = activeTask.pressed.some(
+        (candidate) => candidate.x === point.x && candidate.y === point.y,
+      );
+      wanted.set(
+        point.y * 8 + point.x,
+        pressed ? PAD_COLORS.green : PAD_COLORS.white,
+      );
+    }
   }
   for (const key of litPathPads) {
     if (!wanted.has(key)) {
@@ -471,33 +498,52 @@ function renderDefendScreen(now) {
 function renderPathScreen(now) {
   fillRect(buffer, WIDTH, 0, 0, WIDTH, HEIGHT, 8, 12, 24);
 
-  if (task === null) {
-    drawText(buffer, WIDTH, "STANDBY", 340, 55, 10, [140, 150, 173]);
-    return;
-  }
-  const [, rgb] = PATH_COLORS[task.color] ?? [0, [255, 255, 255]];
   const cell = 17;
   const gridX = 12;
   const gridY = 8;
   for (let gx = 0; gx < 8; gx++) {
     for (let gy = 0; gy < 8; gy++) {
+      const active = gx < activeGridSize && gy < activeGridSize;
       fillRect(buffer, WIDTH,
         gridX + gx * cell, gridY + (7 - gy) * cell,
-        cell - 3, cell - 3, 20, 26, 42);
+        cell - 3, cell - 3, ...(active ? [20, 26, 42] : [5, 7, 10]));
     }
   }
-  task.path.forEach((point, index) => {
-    const traced = index < task.progress;
-    const isNext = index === task.progress;
-    const color = traced ? [60, 66, 82] : isNext ? [255, 255, 255] : rgb;
-    fillRect(buffer, WIDTH,
-      gridX + point.x * cell, gridY + (7 - point.y) * cell,
-      cell - 3, cell - 3, ...color);
-  });
-  drawText(buffer, WIDTH, `${task.color} VECTOR`, 170, 12, 4, rgb);
-  drawText(buffer, WIDTH,
-    `${task.progress}/${task.path.length} TRACED`, 170, 52, 3,
-    [200, 205, 215]);
+  if (task?.kind === "push-path") {
+    const [, rgb] = PATH_COLORS[task.color] ?? [0, [255, 255, 255]];
+    task.path.forEach((point, index) => {
+      const traced = index < task.progress;
+      const isNext = index === task.progress;
+      const color = traced ? [60, 66, 82] : isNext ? [255, 255, 255] : rgb;
+      fillRect(buffer, WIDTH,
+        gridX + point.x * cell, gridY + (7 - point.y) * cell,
+        cell - 3, cell - 3, ...color);
+    });
+    drawText(buffer, WIDTH, `${task.color} VECTOR`, 170, 12, 4, rgb);
+    drawText(buffer, WIDTH,
+      `${task.progress}/${task.path.length} TRACED`, 170, 52, 3,
+      [200, 205, 215]);
+  } else if (task?.kind === "push-corners") {
+    const farEdge = task.gridSize - 1;
+    for (const point of [
+      { x: 0, y: 0 },
+      { x: farEdge, y: 0 },
+      { x: 0, y: farEdge },
+      { x: farEdge, y: farEdge },
+    ]) {
+      const pressed = task.pressed.some(
+        (candidate) => candidate.x === point.x && candidate.y === point.y,
+      );
+      fillRect(buffer, WIDTH,
+        gridX + point.x * cell, gridY + (7 - point.y) * cell,
+        cell - 3, cell - 3, ...(pressed ? [70, 214, 140] : [255, 255, 255]));
+    }
+    drawText(buffer, WIDTH, "CORNERS!", 170, 12, 5, [150, 255, 40]);
+    drawText(buffer, WIDTH, `${task.pressed.length}/4 HIT`, 170, 54, 3,
+      [200, 205, 215]);
+  } else {
+    drawText(buffer, WIDTH, "STANDBY", 170, 26, 6, [140, 150, 173]);
+  }
   drawText(buffer, WIDTH, `SCORE ${phase.score}`, 430, 12, 4, [127, 212, 255]);
   if (phase.combo > 1) {
     drawText(buffer, WIDTH, `COMBO X${phase.combo}`, 430, 52, 3, [255, 230, 0]);
@@ -508,12 +554,15 @@ function renderPathScreen(now) {
   drawText(buffer, WIDTH, "INTEGRITY", 660, 12, 2, [140, 150, 173]);
   fillRect(buffer, WIDTH, 660, 34, 280, 18, 60, 66, 82);
   fillRect(buffer, WIDTH, 662, 36, 276 * (integrity / 100), 14, ...barColor);
-  const missionLeft = Math.max(0, phase.endsAt / 1000 - Date.now() / 1000);
-  drawText(buffer, WIDTH, `MISSION ${missionLeft.toFixed(0)}S`, 660, 66, 2,
+  drawText(buffer, WIDTH,
+    `LEVEL ${phase.level}  ${phase.levelObjectivesCompleted}/${phase.levelObjectiveTarget}`,
+    660, 66, 2,
     [140, 150, 173]);
-  const orderLeft = Math.max(0, task.deadlineAt / 1000 - Date.now() / 1000);
-  drawText(buffer, WIDTH, `ORDER EXPIRES ${orderLeft.toFixed(1)}S`, 170, 100, 3,
-    orderLeft < 3 ? [224, 85, 85] : [140, 150, 173]);
+  if (task !== null) {
+    const orderLeft = Math.max(0, task.deadlineAt / 1000 - Date.now() / 1000);
+    drawText(buffer, WIDTH, `INPUT EXPIRES ${orderLeft.toFixed(1)}S`, 170, 100, 3,
+      orderLeft < 3 ? [224, 85, 85] : [140, 150, 173]);
+  }
 }
 
 function renderScreen() {

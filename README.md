@@ -39,20 +39,37 @@ controller becomes claimable again.
 
 ## Mission rhythm
 
-Every mission moves through three explicit kinds of play:
+Every run starts at Level 1 and advances automatically when the crew clears
+that level's objective quota:
+
+| Level | UF8 | Stream Deck XL | Push |
+| --- | --- | --- | --- |
+| 1 | first 2 faders | first 2 columns | bottom-left 3×3 |
+| 2 | first 3 faders | first 3 columns | bottom-left 4×4 |
+| 3 | first 4 faders | first 4 columns | bottom-left 6×6 |
+| 4 | first 6 faders | first 6 columns | full 8×8 |
+| 5 | all 8 faders | all 8 columns | full 8×8 |
+
+Locked controls stay dim and their inputs are ignored. Later levels also add
+longer sequences, tighter fader holds, longer Push paths, shorter deadlines,
+and eventually the Push defend activity.
+
+The run uses three explicit kinds of play:
 
 - **Orders** are cross-routed. A phone receives an instruction for somebody
   else's controller and the reader must shout it across the crew.
-- **Local Overrides** are short, self-directed hardware bursts. Every active
-  phone clearly says `DO THIS YOURSELF`; Deck hits a called key, UF8 bottoms out
-  all eight faders, and Push hits all four corners.
+- **Interstitials** are six-second, self-directed hardware bursts between
+  levels. One operator receives `DO THIS YOURSELF`; Deck hits a called key, UF8
+  bottoms out the currently active faders, or Push hits the active region's
+  four corners. Success grants a small bonus. Failure costs a little integrity
+  but never blocks the next level.
 - **Reactor Procedures** suspend ordinary orders. The UF8 shows a diagnostic
   code while another player's phone holds the complete calibration table. The
   operator reports the code and the reader calls back the two required fader
   stops.
 
-Opening and pressure Order blocks lead into the Local Override and Reactor
-Procedure respectively. Final Orders then run until the mission timer ends.
+Level 5 ends with the Reactor Procedure when the UF8 is in the crew. A
+two-player Deck-and-Push crew completes the run directly after its final quota.
 
 ## Connect the hardware
 
@@ -73,7 +90,7 @@ mission.
 UF8 orders use the labels printed beside the physical faders:
 `+12`, `+6`, `0`, `-5`, `-10`, `-20`, `-30`, `-40`, `-60`, and `-INF`.
 A task completes after the correct channel remains at its requested stop for
-450 ms.
+350–600 ms, depending on the current level.
 
 The standalone diagnostics require both Synthteam and SSL 360° to be stopped
 because the direct USB transport is exclusive:
@@ -149,10 +166,11 @@ bun run probe:uf8 preview
 ```
 
 `check` uses TypeScript 7 plus type-aware oxlint. The current tests cover
-two-and-three-device task generation, cross-routing, Deck hold/tap/release
-orders, Local Override transitions and penalties, the shared reactor procedure,
-scoring, expiration, station claim races and reconnect reservations, direct UF8
-framing and input decoding, protocol validation, and Push note-grid mapping.
+two-and-three-device task generation, five-level control bounds, cross-routing,
+Deck hold/tap/release orders, interstitial transitions and penalties, the
+shared reactor finale, scoring, expiration, station claim races and reconnect
+reservations, direct UF8 framing and input decoding, protocol validation, and
+Push note-grid mapping.
 `probe:midi` asks macOS CoreMIDI for the exact input and output endpoints
 currently exposed to Chrome. `probe:uf8 preview` verifies direct UF8 packet
 generation without opening the controller.
@@ -170,7 +188,7 @@ The remaining physical gates are:
 - export and document a verified 32-key Stream Deck XL profile;
 - connect the Push, identify its generation, and tune its User-port LED
   palette;
-- complete one 90-second mission without using the development simulator.
+- complete one full five-level run without using the development simulator.
 
 The exact evidence from the first attached-device pass is recorded in
 `docs/hardware-validation.md`.

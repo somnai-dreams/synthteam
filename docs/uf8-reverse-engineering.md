@@ -72,7 +72,7 @@ interruptible scenes driven by authoritative mission state:
 - a full-screen hyperspace attract loop in the lobby;
 - giant flashing seven-segment digits during the `3–2–1` countdown;
 - animated reactor columns and scan lines beneath live control labels;
-- a red alert takeover for local overrides;
+- a red alert takeover for between-level interstitials;
 - distinct survived and hull-lost game-over animations.
 
 Each scene is procedural RGB565 geometry built from the recovered filled-box and

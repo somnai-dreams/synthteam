@@ -53,6 +53,7 @@ describe("UF8 direct runtime boundary", () => {
       scene: { kind: "mission", activity: "reactor-procedure" },
       strips: UF8_CONTROL_LABELS.map((label, index) => ({
         label,
+        active: true,
         cue:
           index === 2
             ? { heading: "REPORT CODE", value: "BETA" }
@@ -79,9 +80,35 @@ describe("UF8 direct runtime boundary", () => {
   test("gives full-screen scenes a clean display takeover", () => {
     const frames = createUf8DisplayFrames({
       scene: { kind: "attract" },
-      strips: UF8_CONTROL_LABELS.map((label) => ({ label, cue: null })),
+      strips: UF8_CONTROL_LABELS.map((label) => ({
+        label,
+        active: true,
+        cue: null,
+      })),
     });
 
     expect(frames).toHaveLength(8);
+  });
+
+  test("marks inactive mission strips as locked", () => {
+    const frames = createUf8DisplayFrames({
+      scene: { kind: "mission", activity: "orders" },
+      strips: UF8_CONTROL_LABELS.map((label, channel) => ({
+        label,
+        active: channel < 2,
+        cue: null,
+      })),
+    });
+    const decoder = new Uf8FrameDecoder();
+    const messages = frames.flatMap((frame) => decoder.push(frame));
+    const text = messages
+      .filter(
+        (message) =>
+          message.code === 100 &&
+          message.payload[0] === 15,
+      )
+      .map((message) => new TextDecoder().decode(message.payload.slice(6)));
+
+    expect(text.filter((value) => value === "LOCKED")).toHaveLength(6);
   });
 });

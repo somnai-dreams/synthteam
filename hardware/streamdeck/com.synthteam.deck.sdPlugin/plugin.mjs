@@ -13,7 +13,7 @@ const contexts = new Map();
 let sdkSocket = null;
 let gameSocket = null;
 let reconnectTimer = null;
-let gameState = { keys: [], task: null };
+let gameState = { keys: [], activeColumns: 0, task: null };
 
 connectSdk();
 connectGame();
@@ -78,7 +78,7 @@ function handleSdkMessage(message) {
     case "keyDown":
     case "keyUp": {
       const index = keyIndex(message);
-      if (index === null) return;
+      if (index === null || !isActiveKey(index)) return;
       sendGame({
         type: "hardware-event",
         event: {
@@ -99,6 +99,16 @@ function renderAll() {
 }
 
 function renderContext(context, index) {
+  if (!isActiveKey(index)) {
+    sendSdk({
+      context,
+      event: "setImage",
+      payload: {
+        image: svgDataUrl("LOCKED", "#344047", "#070a0c", false),
+      },
+    });
+    return;
+  }
   const key = gameState.keys.find((candidate) => candidate.index === index);
   const displayState = keyDisplayState(gameState.task, index);
   const label = key?.label ?? "STANDBY";
@@ -123,6 +133,10 @@ function renderContext(context, index) {
     event: "setImage",
     payload: { image },
   });
+}
+
+function isActiveKey(index) {
+  return index % 8 < gameState.activeColumns;
 }
 
 function keyDisplayState(task, index) {
@@ -204,6 +218,9 @@ function isGameState(value) {
     value !== null &&
     typeof value === "object" &&
     Array.isArray(value.keys) &&
+    Number.isInteger(value.activeColumns) &&
+    value.activeColumns >= 0 &&
+    value.activeColumns <= 8 &&
     (value.task === null ||
       (typeof value.task === "object" &&
         value.task !== null &&
