@@ -20,6 +20,16 @@ const EXPIRED_TASK_DAMAGE = 12;
 const COMPLETION_REPAIR = 2;
 const UF8_HOLD_MS = 450;
 
+// Push defend activity: chance of rolling it instead of a path task,
+// and how its missile parameters scale as the mission progresses
+// (difficulty 0 at mission start, 1 at mission end).
+const PUSH_DEFEND_CHANCE = 0.35;
+const PUSH_DEFEND_HULL = 8;
+const PUSH_DEFEND_SPEED_BASE = 1.4; // pads per second
+const PUSH_DEFEND_SPEED_RAMP = 1.8;
+const PUSH_DEFEND_SPAWN_BASE_MS = 1300;
+const PUSH_DEFEND_SPAWN_RAMP_MS = 750;
+
 const STREAM_DECK_LABELS = [
   "BERYL",
   "NINE",
@@ -139,6 +149,15 @@ export function applyHardwareEvent(
     return { outcomes: [] };
   }
 
+  // The defend activity simulates on the bridge; a failure report ends
+  // the task exactly like an expired order.
+  if (event.kind === "push-defend-failed") {
+    if (task.kind !== "push-defend") {
+      return { outcomes: [] };
+    }
+    return { outcomes: [expireTaskAt(mission, taskIndex, now, dependencies)] };
+  }
+
   const result = applyEventToTask(task, event, now);
   switch (result) {
     case "ignored":
@@ -200,7 +219,15 @@ export function advanceMission(
     }
 
     if (now >= task.deadlineAt) {
-      outcomes.push(expireTaskAt(mission, index, now, dependencies));
+      // Surviving a defend activity's clock is the win condition;
+      // every other task expiring is a failure.
+      if (task.kind === "push-defend") {
+        outcomes.push(
+          ...completeTaskAt(mission, index, now, dependencies).outcomes,
+        );
+      } else {
+        outcomes.push(expireTaskAt(mission, index, now, dependencies));
+      }
     }
   }
 
@@ -223,6 +250,7 @@ function createTaskForRoute(
   target: Station,
   now: number,
   dependencies: MissionDependencies,
+  difficulty = 0,
 ): ActiveTask {
   switch (target) {
     case "streamdeck":
@@ -230,8 +258,13 @@ function createTaskForRoute(
     case "uf8":
       return createUf8Task(reader, now, dependencies);
     case "push":
-      return createPushTask(reader, now, dependencies);
+      return createPushTask(reader, now, dependencies, difficulty);
   }
+}
+
+function missionDifficulty(mission: MissionState, now: number): number {
+  const elapsed = (now - mission.startedAt) / MISSION_DURATION_MS;
+  return Math.min(1, Math.max(0, elapsed));
 }
 
 function createStreamDeckTask(
@@ -282,7 +315,25 @@ function createPushTask(
   reader: Station,
   now: number,
   dependencies: MissionDependencies,
+  difficulty: number,
 ): ActiveTask {
+  if (dependencies.random() > 1 - PUSH_DEFEND_CHANCE) {
+    return {
+      kind: "push-defend",
+      id: dependencies.makeId(),
+      reader,
+      createdAt: now,
+      deadlineAt: now + TASK_DURATION_MS, // survive until here to pass
+      missileSpeed:
+        Math.round(
+          (PUSH_DEFEND_SPEED_BASE + PUSH_DEFEND_SPEED_RAMP * difficulty) * 100,
+        ) / 100,
+      spawnIntervalMs: Math.round(
+        PUSH_DEFEND_SPAWN_BASE_MS - PUSH_DEFEND_SPAWN_RAMP_MS * difficulty,
+      ),
+      hull: PUSH_DEFEND_HULL,
+    };
+  }
   return {
     kind: "push-path",
     id: dependencies.makeId(),
@@ -393,6 +444,11 @@ function applyEventToTask(
       task.progress = 0;
       return "mistake";
     }
+
+    case "push-defend":
+      // Pads are handled locally by the bridge during the defend
+      // activity; only push-defend-failed matters, handled upstream.
+      return "ignored";
   }
 }
 
@@ -403,6 +459,7 @@ function stationForEvent(event: HardwareEvent): Station {
     case "uf8-fader":
       return "uf8";
     case "push-pad":
+    case "push-defend-failed":
       return "push";
   }
 }
@@ -426,6 +483,7 @@ function completeTaskAt(
     stationForTask(completed),
     now,
     dependencies,
+    missionDifficulty(mission, now),
   );
   return {
     outcomes: [
@@ -457,6 +515,7 @@ function expireTaskAt(
     stationForTask(expired),
     now,
     dependencies,
+    missionDifficulty(mission, now),
   );
   return {
     kind: "expired",

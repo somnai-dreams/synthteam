@@ -61,10 +61,20 @@ export type PushPathTask = TaskBase & {
   progress: number;
 };
 
+export type PushDefendTask = TaskBase & {
+  kind: "push-defend";
+  missileSpeed: number; // pads per second
+  spawnIntervalMs: number;
+  hull: number; // segments the bridge starts with
+};
+
+export type ActivePushTask = PushPathTask | PushDefendTask;
+
 export type ActiveTask =
   | StreamDeckRouteTask
   | Uf8FaderTask
-  | PushPathTask;
+  | PushPathTask
+  | PushDefendTask;
 
 export type StreamDeckHardwareEvent = {
   kind: "streamdeck-key";
@@ -85,10 +95,15 @@ export type PushHardwareEvent = {
   velocity: number;
 };
 
+export type PushDefendFailedEvent = {
+  kind: "push-defend-failed";
+};
+
 export type HardwareEvent =
   | StreamDeckHardwareEvent
   | Uf8HardwareEvent
-  | PushHardwareEvent;
+  | PushHardwareEvent
+  | PushDefendFailedEvent;
 
 export type MissionState = {
   startedAt: number;
@@ -137,6 +152,7 @@ export function stationForTask(task: ActiveTask): Station {
     case "uf8-fader":
       return "uf8";
     case "push-path":
+    case "push-defend":
       return "push";
   }
 }
@@ -169,5 +185,7 @@ export function describeTask(
       return `SET ${task.label} TO ${task.target}`;
     case "push-path":
       return `TRACE THE ${task.color.toUpperCase()} VECTOR`;
+    case "push-defend":
+      return "DEFEND THE MOTHERSHIP";
   }
 }

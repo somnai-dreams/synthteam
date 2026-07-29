@@ -12,7 +12,7 @@ import type {
   MissionOutcome,
   MissionState,
   MissionStations,
-  PushPathTask,
+  ActivePushTask,
   Station,
   StreamDeckRouteTask,
 } from "../shared/domain.ts";
@@ -398,7 +398,8 @@ function pushState(): PushStateView {
     return { phase: phaseView(), task: null };
   }
   const task = game.mission.tasks.find(
-    (candidate): candidate is PushPathTask => candidate.kind === "push-path",
+    (candidate): candidate is ActivePushTask =>
+      candidate.kind === "push-path" || candidate.kind === "push-defend",
   );
   return { phase: phaseView(), task: task ?? null };
 }

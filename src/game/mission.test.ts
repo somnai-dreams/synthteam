@@ -182,6 +182,76 @@ describe("controller-specific tasks", () => {
   });
 });
 
+describe("push defend activity", () => {
+  function defendDependencies(): MissionDependencies {
+    let nextId = 0;
+    return {
+      random: () => 0.9, // rolls the defend variant for the Push station
+      makeId: () => {
+        nextId += 1;
+        return `task-${nextId}`;
+      },
+    };
+  }
+
+  test("rolls a defend task with base parameters at mission start", () => {
+    const mission = createMission(1_000, STATIONS, defendDependencies());
+    const task = taskOfKind(mission.tasks, "push-defend");
+
+    expect(task.missileSpeed).toBe(1.4);
+    expect(task.spawnIntervalMs).toBe(1_300);
+    expect(task.hull).toBe(8);
+  });
+
+  test("completes when the survival clock runs out", () => {
+    const dependencies = defendDependencies();
+    const mission = createMission(1_000, STATIONS, dependencies);
+    const task = taskOfKind(mission.tasks, "push-defend");
+
+    const update = advanceMission(mission, task.deadlineAt, dependencies);
+
+    expect(
+      update.outcomes.some(
+        (outcome) => outcome.kind === "completed" && outcome.target === "push",
+      ),
+    ).toBe(true);
+    expect(mission.score).toBe(100);
+  });
+
+  test("a bridge failure report ends it like an expired order", () => {
+    const dependencies = defendDependencies();
+    const mission = createMission(1_000, STATIONS, dependencies);
+    const task = taskOfKind(mission.tasks, "push-defend");
+
+    const update = applyHardwareEvent(
+      mission,
+      { kind: "push-defend-failed" },
+      2_000,
+      dependencies,
+    );
+
+    expect(update.outcomes[0]?.kind).toBe("expired");
+    expect(mission.integrity).toBe(88);
+    expect(taskOfKind(mission.tasks, "push-defend").id).not.toBe(task.id);
+  });
+
+  test("replacement tasks get faster later in the mission", () => {
+    const dependencies = defendDependencies();
+    const mission = createMission(1_000, STATIONS, dependencies);
+
+    applyHardwareEvent(
+      mission,
+      { kind: "push-defend-failed" },
+      46_000, // halfway through the 90s mission
+      dependencies,
+    );
+
+    const replacement = taskOfKind(mission.tasks, "push-defend");
+    expect(replacement.missileSpeed).toBe(2.3);
+    expect(replacement.spawnIntervalMs).toBe(925);
+  });
+});
+
 describe("mission pressure", () => {
   test("damages integrity and replaces expired orders", () => {
     const dependencies = deterministicDependencies();
