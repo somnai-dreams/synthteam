@@ -39,4 +39,10 @@ describe("client protocol", () => {
   test("rejects malformed JSON", () => {
     expect(parseClientMessage("{oops")).toBeNull();
   });
+
+  test("accepts the Stream Deck plugin handshake", () => {
+    expect(
+      parseClientMessage(JSON.stringify({ type: "streamdeck-join" })),
+    ).toEqual({ type: "streamdeck-join" });
+  });
 });

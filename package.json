@@ -3,9 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build --target=bun --outdir=dist src/server/index.ts",
+    "build": "bun run build:app && bun run build:streamdeck",
+    "build:app": "bun build --target=bun --outdir=dist src/server/index.ts",
+    "build:streamdeck": "bun build --target=node --outdir=dist/streamdeck hardware/streamdeck/com.synthteam.deck.sdPlugin/plugin.mjs",
     "check": "tsc && oxlint --type-aware --deny-warnings src",
     "dev": "bun --hot src/server/index.ts",
+    "probe:midi": "xcrun swift -module-cache-path /tmp/synthteam-swift-module-cache scripts/probe-midi.swift",
     "start": "bun src/server/index.ts",
     "test": "bun test"
   },

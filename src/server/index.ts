@@ -8,9 +8,11 @@ import {
 import type {
   CrewMember,
   CrewSlots,
+  HardwareEvent,
   MissionOutcome,
   MissionState,
   Station,
+  StreamDeckRouteTask,
 } from "../shared/domain.ts";
 import { STATIONS } from "../shared/domain.ts";
 import type {
@@ -30,7 +32,8 @@ import {
 type ViewerIdentity =
   | { kind: "anonymous" }
   | { kind: "phone"; crewId: string; station: Station }
-  | { kind: "console" };
+  | { kind: "console" }
+  | { kind: "streamdeck" };
 
 type SocketData = {
   viewer: ViewerIdentity;
@@ -101,6 +104,10 @@ const server = Bun.serve<SocketData>({
         sockets.splice(socketIndex, 1);
       }
       const viewer = socket.data.viewer;
+      if (viewer.kind === "streamdeck") {
+        broadcastSnapshots();
+        return;
+      }
       if (viewer.kind !== "phone") {
         return;
       }
@@ -134,6 +141,10 @@ function handleMessage(
       socket.data.viewer = { kind: "console" };
       sendSnapshot(socket);
       return;
+    case "streamdeck-join":
+      socket.data.viewer = { kind: "streamdeck" };
+      broadcastSnapshots();
+      return;
     case "phone-join":
       joinPhone(socket, message.name, message.station, message.resumeCrewId);
       return;
@@ -150,7 +161,10 @@ function handleMessage(
       }
       return;
     case "hardware-event":
-      if (!requireConsole(socket) || game.kind !== "playing") {
+      if (
+        !canSubmitHardware(socket, message.event.kind) ||
+        game.kind !== "playing"
+      ) {
         return;
       }
       recordOutcomes(
@@ -290,6 +304,10 @@ function recordOutcomes(outcomes: readonly MissionOutcome[]): void {
 }
 
 function sendSnapshot(socket: Bun.ServerWebSocket<SocketData>): void {
+  if (socket.data.viewer.kind === "streamdeck") {
+    send(socket, { type: "streamdeck-state", state: streamDeckState() });
+    return;
+  }
   send(socket, { type: "snapshot", snapshot: snapshotFor(socket.data.viewer) });
 }
 
@@ -299,12 +317,17 @@ function broadcastSnapshots(): void {
   }
 }
 
-function snapshotFor(viewer: ViewerIdentity): ViewSnapshot {
+function snapshotFor(
+  viewer: Exclude<ViewerIdentity, { kind: "streamdeck" }>,
+): ViewSnapshot {
   const base = {
     crew,
     phase: phaseView(),
     activity,
     phoneUrls,
+    streamDeckConnected: sockets.some(
+      (socket) => socket.data.viewer.kind === "streamdeck",
+    ),
   };
   switch (viewer.kind) {
     case "anonymous":
@@ -335,6 +358,23 @@ function snapshotFor(viewer: ViewerIdentity): ViewSnapshot {
       return snapshot;
     }
   }
+}
+
+function streamDeckState() {
+  if (game.kind !== "playing") {
+    return { keys: [], task: null };
+  }
+  const task = game.mission.tasks.find(
+    (candidate): candidate is StreamDeckRouteTask =>
+      candidate.kind === "streamdeck-route",
+  );
+  if (task === undefined) {
+    throw new Error("Playing mission has no Stream Deck task");
+  }
+  return {
+    keys: game.mission.streamDeckKeys,
+    task,
+  };
 }
 
 function phaseView(): MissionPhaseView {
@@ -369,6 +409,25 @@ function requireConsole(socket: Bun.ServerWebSocket<SocketData>): boolean {
     message: "Only the central console can do that",
   });
   return false;
+}
+
+function canSubmitHardware(
+  socket: Bun.ServerWebSocket<SocketData>,
+  eventKind: HardwareEvent["kind"],
+): boolean {
+  switch (socket.data.viewer.kind) {
+    case "console":
+      return true;
+    case "streamdeck":
+      return eventKind === "streamdeck-key";
+    case "anonymous":
+    case "phone":
+      send(socket, {
+        type: "error",
+        message: "This connection cannot submit hardware input",
+      });
+      return false;
+  }
 }
 
 function addActivity(text: string, tone: ActivityItem["tone"]): void {

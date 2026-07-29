@@ -14,6 +14,7 @@ import type {
   ViewSnapshot,
 } from "../shared/protocol.ts";
 import { parseServerMessage } from "../shared/protocol.ts";
+import { MidiBridge, type MidiDeviceOption } from "./midi.ts";
 
 type SavedCrew = {
   crewId: string;
@@ -28,6 +29,7 @@ if (appElement === null) {
 const app = appElement;
 
 const isConsole = window.location.pathname === "/console";
+const midiBridge = isConsole ? new MidiBridge(sendHardware, render) : null;
 let socket: WebSocket | null = null;
 let snapshot: ViewSnapshot | null = null;
 let errorMessage = "";
@@ -86,6 +88,8 @@ function connect(): void {
           }
         }
         render();
+        return;
+      case "streamdeck-state":
         return;
     }
   });
@@ -282,6 +286,7 @@ function renderConsole(): void {
     `;
     return;
   }
+  midiBridge?.syncMission(snapshot.mission?.tasks ?? []);
   app.innerHTML = consoleMarkup(snapshot);
   bindConsoleActions(snapshot);
 }
@@ -300,6 +305,7 @@ function consoleMarkup(consoleSnapshot: ConsoleSnapshot): string {
         </div>
       </header>
       ${consolePhaseMarkup(consoleSnapshot)}
+      ${hardwarePanelMarkup(consoleSnapshot)}
       ${activityMarkup(consoleSnapshot)}
       ${errorMarkup()}
     </main>
@@ -475,6 +481,7 @@ function pushSimulator(consoleSnapshot: ConsoleSnapshot): string {
 }
 
 function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
+  bindMidiActions();
   document.querySelector("#start-mission")?.addEventListener("click", () => {
     send({ type: "start-mission" });
   });
@@ -517,6 +524,168 @@ function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
       });
     });
   }
+}
+
+function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
+  const bridge = midiBridge;
+  if (bridge === null) {
+    return "";
+  }
+  const view = bridge.view();
+  const streamDeckStatus = consoleSnapshot.streamDeckConnected
+    ? "CONNECTED"
+    : "WAITING FOR PLUGIN";
+  let midiContent = "";
+  switch (view.status) {
+    case "unsupported":
+      midiContent = `
+        <p class="hardware-note">Web MIDI is unavailable. Open the central console in Chrome on the hardware laptop.</p>
+      `;
+      break;
+    case "idle":
+    case "requesting":
+      midiContent = `
+        <button id="enable-midi" class="secondary-button" ${view.status === "requesting" ? "disabled" : ""}>
+          ${view.status === "requesting" ? "REQUESTING MIDI…" : "ENABLE MIDI DEVICES"}
+        </button>
+      `;
+      break;
+    case "error":
+      midiContent = `
+        <p class="hardware-note is-error">${escapeHtml(view.error)}</p>
+        <button id="enable-midi" class="secondary-button">TRY MIDI AGAIN</button>
+      `;
+      break;
+    case "ready":
+      midiContent = `
+        <div class="midi-device-grid">
+          <div class="midi-device station-uf8">
+            <div class="hardware-device-title">
+              <span class="station-indicator"></span>
+              <strong>SSL UF8</strong>
+              <small>${view.configuration.uf8Faders.filter((binding) => binding !== null).length}/8 FADERS</small>
+            </div>
+            <label>
+              INPUT
+              <select id="uf8-midi-input">
+                ${midiOptions(view.inputs, view.configuration.uf8InputId, "Select UF8 MIDI input")}
+              </select>
+            </label>
+            <button id="learn-uf8" class="secondary-button">LEARN FADERS 1 → 8</button>
+          </div>
+          <div class="midi-device station-push">
+            <div class="hardware-device-title">
+              <span class="station-indicator"></span>
+              <strong>ABLETON PUSH</strong>
+              <small>${view.configuration.pushGrid === null ? "GRID UNMAPPED" : "GRID READY"}</small>
+            </div>
+            <label>
+              USER INPUT
+              <select id="push-midi-input">
+                ${midiOptions(view.inputs, view.configuration.pushInputId, "Select Push User input")}
+              </select>
+            </label>
+            <label>
+              USER OUTPUT
+              <select id="push-midi-output">
+                ${midiOptions(view.outputs, view.configuration.pushOutputId, "Select Push User output")}
+              </select>
+            </label>
+            <button id="learn-push" class="secondary-button">LEARN 3 GRID CORNERS</button>
+          </div>
+        </div>
+      `;
+      break;
+  }
+  return `
+    <section class="hardware-setup">
+      <div class="hardware-setup-heading">
+        <div>
+          <div class="eyebrow">DEVICE BRIDGE</div>
+          <h2>Physical controls</h2>
+        </div>
+        <div class="deck-bridge-state ${consoleSnapshot.streamDeckConnected ? "is-connected" : ""}">
+          <i></i><span>STREAM DECK</span><strong>${streamDeckStatus}</strong>
+        </div>
+      </div>
+      ${midiContent}
+      ${
+        view.learnText.length === 0
+          ? ""
+          : `
+            <div class="learn-banner">
+              <span>${escapeHtml(view.learnText)}</span>
+              <button id="cancel-midi-learn">CANCEL</button>
+            </div>
+          `
+      }
+      ${view.error.length > 0 && view.status !== "error" ? `<p class="hardware-note is-error">${escapeHtml(view.error)}</p>` : ""}
+    </section>
+  `;
+}
+
+function bindMidiActions(): void {
+  const bridge = midiBridge;
+  if (bridge === null) {
+    return;
+  }
+  document.querySelector("#enable-midi")?.addEventListener("click", () => {
+    void bridge.requestAccess();
+  });
+  document
+    .querySelector<HTMLSelectElement>("#uf8-midi-input")
+    ?.addEventListener("change", (event) => {
+      const select = event.currentTarget;
+      if (!(select instanceof HTMLSelectElement)) {
+        throw new Error("UF8 MIDI selection did not come from a select");
+      }
+      bridge.setUf8Input(select.value.length === 0 ? null : select.value);
+    });
+  document
+    .querySelector<HTMLSelectElement>("#push-midi-input")
+    ?.addEventListener("change", (event) => {
+      const select = event.currentTarget;
+      if (!(select instanceof HTMLSelectElement)) {
+        throw new Error("Push MIDI selection did not come from a select");
+      }
+      bridge.setPushInput(select.value.length === 0 ? null : select.value);
+    });
+  document
+    .querySelector<HTMLSelectElement>("#push-midi-output")
+    ?.addEventListener("change", (event) => {
+      const select = event.currentTarget;
+      if (!(select instanceof HTMLSelectElement)) {
+        throw new Error("Push output selection did not come from a select");
+      }
+      bridge.setPushOutput(select.value.length === 0 ? null : select.value);
+    });
+  document.querySelector("#learn-uf8")?.addEventListener("click", () => {
+    bridge.learnUf8Bank();
+  });
+  document.querySelector("#learn-push")?.addEventListener("click", () => {
+    bridge.learnPushGrid();
+  });
+  document
+    .querySelector("#cancel-midi-learn")
+    ?.addEventListener("click", () => {
+      bridge.cancelLearn();
+    });
+}
+
+function midiOptions(
+  devices: readonly MidiDeviceOption[],
+  selectedId: string | null,
+  placeholder: string,
+): string {
+  return `
+    <option value="">${escapeHtml(placeholder)}</option>
+    ${devices
+      .map(
+        (device) =>
+          `<option value="${escapeHtml(device.id)}" ${device.id === selectedId ? "selected" : ""}>${escapeHtml(device.label)}</option>`,
+      )
+      .join("")}
+  `;
 }
 
 function missionMeterMarkup(phase: Extract<MissionPhaseView, { kind: "playing" }>): string {

@@ -59,3 +59,16 @@ button command.
 The MVP is proven when three players can join from phones and complete a
 90-second mission using the three physical devices without touching the central
 laptop after launch.
+
+## Adapter boundary
+
+The game engine never receives arbitrary strings or generic control values.
+Every external input is normalized at the adapter boundary into one of:
+
+- `streamdeck-key`, with a 0–31 coordinate-derived index and down/up phase;
+- `uf8-fader`, with a 0–7 channel and normalized 0–100 value;
+- `push-pad`, with an 8×8 coordinate, down/up phase, and velocity.
+
+The Stream Deck plugin connects directly to the Bun WebSocket. The central
+Chrome console owns Web MIDI for UF8 and Push because it is served from the
+trusted `localhost` origin. Player phones do not request hardware permissions.

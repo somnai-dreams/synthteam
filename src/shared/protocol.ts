@@ -5,6 +5,7 @@ import type {
   MissionState,
   Station,
   StreamDeckKey,
+  StreamDeckRouteTask,
 } from "./domain.ts";
 import {
   describeTask,
@@ -55,6 +56,7 @@ type SnapshotBase = {
   phase: MissionPhaseView;
   activity: readonly ActivityItem[];
   phoneUrls: readonly string[];
+  streamDeckConnected: boolean;
 };
 
 export type AnonymousSnapshot = SnapshotBase & {
@@ -88,6 +90,7 @@ export type ClientMessage =
       resumeCrewId: string | null;
     }
   | { type: "console-join" }
+  | { type: "streamdeck-join" }
   | { type: "start-mission" }
   | { type: "reset-mission" }
   | { type: "hardware-event"; event: HardwareEvent }
@@ -95,8 +98,14 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "snapshot"; snapshot: ViewSnapshot }
+  | { type: "streamdeck-state"; state: StreamDeckStateView }
   | { type: "error"; message: string }
   | { type: "pong" };
+
+export type StreamDeckStateView = {
+  keys: readonly StreamDeckKey[];
+  task: StreamDeckRouteTask | null;
+};
 
 export function publicOrderForReader(
   mission: MissionState,
@@ -119,6 +128,7 @@ export function parseClientMessage(raw: string): ClientMessage | null {
 
   switch (value.type) {
     case "console-join":
+    case "streamdeck-join":
     case "start-mission":
     case "reset-mission":
     case "ping":
@@ -163,6 +173,8 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return isSnapshot(value.snapshot)
         ? { type: "snapshot", snapshot: value.snapshot }
         : null;
+    case "streamdeck-state":
+      return null;
     default:
       return null;
   }
@@ -220,7 +232,8 @@ function isSnapshot(value: unknown): value is ViewSnapshot {
     !isRecord(value.crew) ||
     !isPhase(value.phase) ||
     !Array.isArray(value.activity) ||
-    !isStringArray(value.phoneUrls)
+    !isStringArray(value.phoneUrls) ||
+    typeof value.streamDeckConnected !== "boolean"
   ) {
     return false;
   }
@@ -299,6 +312,7 @@ type JsonRecord = {
   crew?: unknown;
   activity?: unknown;
   phoneUrls?: unknown;
+  streamDeckConnected?: unknown;
   order?: unknown;
   mission?: unknown;
   crewId?: unknown;
