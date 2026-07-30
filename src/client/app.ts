@@ -612,6 +612,12 @@ function testingPanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
   `;
 }
 
+function guideEntries(): readonly GameInfo[] {
+  return [...GAME_TASK_KINDS.map((kind) => GAME_INFO[kind]), ...UF8_GUIDE_INFO].sort(
+    (a, b) => STATIONS.indexOf(a.station) - STATIONS.indexOf(b.station),
+  );
+}
+
 function gameGuideMarkup(): string {
   return `
     <section class="game-guide">
@@ -620,10 +626,7 @@ function gameGuideMarkup(): string {
         <h2>Every order type</h2>
       </div>
       <div class="guide-grid">
-        ${[...GAME_TASK_KINDS.map((kind) => GAME_INFO[kind]), ...UF8_GUIDE_INFO]
-          .sort(
-            (a, b) => STATIONS.indexOf(a.station) - STATIONS.indexOf(b.station),
-          )
+        ${guideEntries()
           .map((info) => {
             return `
           <article class="guide-card station-${info.station}">
@@ -649,16 +652,18 @@ function phoneGuideMarkup(): string {
   return `
     <details class="phone-guide">
       <summary>HOW THE GAMES WORK</summary>
-      ${GAME_TASK_KINDS.map((kind) => {
-        const info = GAME_INFO[kind];
-        return `
-        <div class="phone-guide-item station-${info.station}">
-          <div class="guide-preview">${info.preview}</div>
-          <strong>${info.name} · ${stationShortName(info.station)}</strong>
-          <p>${info.description}</p>
-        </div>
-      `;
-      }).join("")}
+      <div class="phone-guide-carousel">
+        ${guideEntries()
+          .map((info) => {
+            return `
+          <div class="phone-guide-item station-${info.station}">
+            <div class="guide-preview">${info.preview}</div>
+            <strong>${info.name} · ${stationShortName(info.station)}</strong>
+            <p>${info.description}</p>
+          </div>
+        `;
+        }).join("")}
+      </div>
     </details>
   `;
 }
