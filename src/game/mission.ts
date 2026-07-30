@@ -163,10 +163,8 @@ export type MissionDependencies = {
   makeId: () => string;
 };
 
-/** Which order variants may be generated, keyed by task kind. */
-export type ActivitySettings = Record<GameTaskKind, boolean>;
-
 export type GameTaskKind =
+  | "uf8-fader"
   | "streamdeck-route"
   | "streamdeck-sequence"
   | "push-path"
@@ -176,6 +174,7 @@ export type GameTaskKind =
   | "push-cow";
 
 export const GAME_TASK_KINDS: readonly GameTaskKind[] = [
+  "uf8-fader",
   "streamdeck-route",
   "streamdeck-sequence",
   "push-path",
@@ -184,6 +183,22 @@ export const GAME_TASK_KINDS: readonly GameTaskKind[] = [
   "push-review",
   "push-cow",
 ];
+
+export const CONFIGURABLE_GAME_TASK_KINDS = [
+  "streamdeck-route",
+  "streamdeck-sequence",
+  "push-path",
+  "push-defend",
+  "push-console",
+  "push-review",
+  "push-cow",
+] as const satisfies readonly GameTaskKind[];
+
+export type ConfigurableGameTaskKind =
+  (typeof CONFIGURABLE_GAME_TASK_KINDS)[number];
+
+/** Which campaign order variants may be generated. */
+export type ActivitySettings = Record<ConfigurableGameTaskKind, boolean>;
 
 export function defaultActivitySettings(): ActivitySettings {
   return {
@@ -252,6 +267,48 @@ export function createMission(
       dependencies,
       missionLevelProfile(level),
     ),
+  };
+}
+
+export function createStandaloneMission(
+  kind: GameTaskKind,
+  now: number,
+  dependencies: MissionDependencies = DEFAULT_DEPENDENCIES,
+  initialUf8Faders: Uf8FaderValues = DEFAULT_UF8_FADERS,
+): MissionState {
+  const mission = createMission(
+    now,
+    STATIONS,
+    dependencies,
+    initialUf8Faders,
+  );
+  prepareStandaloneRound(mission, kind, now, dependencies);
+  return mission;
+}
+
+export function prepareStandaloneRound(
+  mission: MissionState,
+  kind: GameTaskKind,
+  now: number,
+  dependencies: MissionDependencies = DEFAULT_DEPENDENCIES,
+): void {
+  const level: MissionLevel = 5;
+  const target = stationForGameTaskKind(kind);
+  mission.level = level;
+  mission.levelObjectivesCompleted = 0;
+  mission.integrity = 100;
+  mission.activity = {
+    kind: "orders",
+    startedAt: now,
+    tasks: [
+      createGameTask(
+        kind,
+        readerForTarget(mission.stations, target),
+        now,
+        dependencies,
+        missionLevelProfile(level),
+      ),
+    ],
   };
 }
 
@@ -720,58 +777,47 @@ function createPushReviewTask(
   };
 }
 
-/**
- * Testing hook: replace a station's current order with a freshly
- * generated task of the requested kind, bypassing the chance roll.
- * Only works while the orders activity is running; returns the new
- * task or null.
- */
-export function forceOrderTask(
-  mission: MissionState,
+function createGameTask(
   kind: GameTaskKind,
+  reader: Station,
   now: number,
-  dependencies: MissionDependencies = DEFAULT_DEPENDENCIES,
-): ActiveTask | null {
-  if (mission.activity.kind !== "orders") {
-    return null;
+  dependencies: MissionDependencies,
+  profile: MissionLevelProfile,
+): ActiveTask {
+  switch (kind) {
+    case "uf8-fader":
+      return createUf8Task(reader, now, dependencies, profile);
+    case "streamdeck-route":
+      return createStreamDeckRouteTask(reader, now, dependencies, profile);
+    case "streamdeck-sequence":
+      return createStreamDeckSequenceTask(reader, now, dependencies, profile);
+    case "push-path":
+      return createPushPathTask(reader, now, dependencies, profile);
+    case "push-defend":
+      return createPushDefendTask(reader, now, dependencies, profile);
+    case "push-console":
+      return createPushConsoleTask(reader, now, dependencies, profile);
+    case "push-review":
+      return createPushReviewTask(reader, now, dependencies, profile);
+    case "push-cow":
+      return createPushCowTask(reader, now, dependencies, profile);
   }
-  const station: Station =
-    kind.startsWith("streamdeck") ? "streamdeck" : "push";
-  const index = mission.activity.tasks.findIndex(
-    (task) => stationForTask(task) === station,
-  );
-  const previous = mission.activity.tasks[index];
-  if (previous === undefined) {
-    return null;
-  }
-  const profile = missionLevelProfile(mission.level);
-  const reader = previous.reader;
-  let task: ActiveTask;
+}
+
+function stationForGameTaskKind(kind: GameTaskKind): Station {
   switch (kind) {
     case "streamdeck-route":
-      task = createStreamDeckRouteTask(reader, now, dependencies, profile);
-      break;
     case "streamdeck-sequence":
-      task = createStreamDeckSequenceTask(reader, now, dependencies, profile);
-      break;
+      return "streamdeck";
+    case "uf8-fader":
+      return "uf8";
     case "push-path":
-      task = createPushPathTask(reader, now, dependencies, profile);
-      break;
     case "push-defend":
-      task = createPushDefendTask(reader, now, dependencies, profile);
-      break;
     case "push-console":
-      task = createPushConsoleTask(reader, now, dependencies, profile);
-      break;
     case "push-review":
-      task = createPushReviewTask(reader, now, dependencies, profile);
-      break;
     case "push-cow":
-      task = createPushCowTask(reader, now, dependencies, profile);
-      break;
+      return "push";
   }
-  mission.activity.tasks[index] = task;
-  return task;
 }
 
 function createPushConsoleTask(

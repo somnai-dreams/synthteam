@@ -4,7 +4,7 @@ import {
   createUf8DisplayFrames,
   decodeUf8FaderEvent,
 } from "./runtime.ts";
-import { Uf8FrameDecoder } from "./protocol.ts";
+import { Uf8FrameDecoder } from "@somnai-dreams/ssl-uf8";
 
 describe("UF8 direct runtime boundary", () => {
   test("normalizes native fader positions to game percentages", () => {

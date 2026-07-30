@@ -32,11 +32,11 @@ bottom-left region, ignores pads outside it, and expands from 3×3 to the full
 interstitial. In the lobby the screen shows link status; game over shows the
 result.
 
-Everything is JavaScript: `@julusian/midi` (RtMidi) for pads, buttons
-and LEDs, and the `usb` package's WebUSB-shaped API for the display.
-`push3.js` is a small reusable library (pad/encoder/dial events,
-button backlights, RGBA frames to the screen); `bridge.js` is the
-Synthteam client on top of it; `font.js` renders the text.
+The bridge consumes the publishable TypeScript
+[`@somnai-dreams/ableton-push`](https://github.com/somnai-dreams/ableton-push/tree/v0.1.0)
+package for pads, buttons, encoders, the touch strip, LEDs, and direct RGBA
+display frames. `bridge.js` contains only the Synthteam client and game
+rendering; `font.js` renders its text.
 
 The Push 3 exposes the same USB display protocol as the Push 2
 (Ableton's push-interface docs apply); only the USB product id differs.
@@ -47,7 +47,7 @@ required.
 ## Requirements
 
 - Push 3 connected over USB, in Control Mode (not driving Live)
-- Bun (Node 22+ also works: `node bridge.js`)
+- Bun 1.3 or newer
 
 ## Run
 
@@ -66,5 +66,5 @@ order doesn't matter. Point it at a non-default server with
 `--server ws://host:port/ws`.
 
 Note: only one process can hold the Push display — close Live and any
-other Push tool before starting the bridge. Push 2 should work after
-changing `PRODUCT_ID` to `0x1967` in `push3.js` (untested).
+other Push tool before starting the bridge. The library exposes explicit Push
+2 and Push 3 models; this bridge selects the current Push 3 configuration.

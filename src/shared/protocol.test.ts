@@ -96,6 +96,28 @@ describe("client protocol", () => {
     ).toEqual({ type: "push-join" });
   });
 
+  test("accepts a standalone game launch and rejects unknown games", () => {
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "start-standalone",
+          game: "uf8-fader",
+        }),
+      ),
+    ).toEqual({
+      type: "start-standalone",
+      game: "uf8-fader",
+    });
+    expect(
+      parseClientMessage(
+        JSON.stringify({
+          type: "start-standalone",
+          game: "asteroid-golf",
+        }),
+      ),
+    ).toBeNull();
+  });
+
   test("accepts the server-owned UF8 connection state", () => {
     const snapshot = {
       viewer: { kind: "console" },
