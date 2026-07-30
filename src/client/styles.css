@@ -1844,7 +1844,7 @@ small {
 }
 
 .phone-guide-item {
-  flex: 0 0 min(78%, 240px);
+  flex: 0 0 100%;
   scroll-snap-align: center;
   display: flex;
   flex-direction: column;
