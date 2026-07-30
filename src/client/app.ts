@@ -135,12 +135,14 @@ function renderPhone(): void {
   if (snapshot === null || snapshot.viewer.kind === "anonymous") {
     app.innerHTML = phoneJoinMarkup();
     bindPhoneJoin();
+    bindPhoneGuide();
     return;
   }
   if (!isPhoneSnapshot(snapshot)) {
     throw new Error("Console snapshot reached phone route");
   }
   app.innerHTML = phoneShellMarkup(snapshot);
+  bindPhoneGuide();
 }
 
 function phoneJoinMarkup(): string {
@@ -649,11 +651,12 @@ function gameGuideMarkup(): string {
 }
 
 function phoneGuideMarkup(): string {
+  const entries = guideEntries();
   return `
     <details class="phone-guide">
       <summary>HOW THE GAMES WORK</summary>
       <div class="phone-guide-carousel">
-        ${guideEntries()
+        ${entries
           .map((info) => {
             return `
           <div class="phone-guide-item station-${info.station}">
@@ -664,8 +667,51 @@ function phoneGuideMarkup(): string {
         `;
         }).join("")}
       </div>
+      <div class="phone-guide-dots" aria-hidden="true">
+        ${entries
+          .map((_, index) => `<i class="${index === 0 ? "is-active" : ""}"></i>`)
+          .join("")}
+      </div>
     </details>
   `;
+}
+
+/**
+ * Light the dot for whichever card the carousel has settled on, so the
+ * cards before and after the current one stay visible at a glance.
+ */
+function bindPhoneGuide(): void {
+  const carousel = document.querySelector<HTMLElement>(".phone-guide-carousel");
+  const dots = [
+    ...document.querySelectorAll<HTMLElement>(".phone-guide-dots i"),
+  ];
+  if (carousel === null || dots.length === 0) {
+    return;
+  }
+  const syncDots = (): void => {
+    const cards = [...carousel.children] as HTMLElement[];
+    // offsetLeft is measured from the offset parent, not the scroll
+    // origin, so track each card relative to the first one.
+    const origin = cards[0]?.offsetLeft ?? 0;
+    let nearest = 0;
+    let shortest = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < cards.length; index += 1) {
+      const card = cards[index];
+      if (card === undefined) {
+        continue;
+      }
+      const distance = Math.abs(card.offsetLeft - origin - carousel.scrollLeft);
+      if (distance < shortest) {
+        shortest = distance;
+        nearest = index;
+      }
+    }
+    for (let index = 0; index < dots.length; index += 1) {
+      dots[index]?.classList.toggle("is-active", index === nearest);
+    }
+  };
+  carousel.addEventListener("scroll", syncDots, { passive: true });
+  syncDots();
 }
 
 function consoleMarkup(consoleSnapshot: ConsoleSnapshot): string {
