@@ -282,34 +282,77 @@ export function createStandaloneMission(
     dependencies,
     initialUf8Faders,
   );
-  prepareStandaloneRound(mission, kind, now, dependencies);
+  prepareStandaloneRound(mission, [kind], now, dependencies);
   return mission;
 }
 
 export function prepareStandaloneRound(
   mission: MissionState,
-  kind: GameTaskKind,
+  kinds: readonly GameTaskKind[],
   now: number,
   dependencies: MissionDependencies = DEFAULT_DEPENDENCIES,
 ): void {
   const level: MissionLevel = 5;
-  const target = stationForGameTaskKind(kind);
   mission.level = level;
   mission.levelObjectivesCompleted = 0;
   mission.integrity = 100;
   mission.activity = {
     kind: "orders",
     startedAt: now,
-    tasks: [
+    tasks: kinds.map((kind) =>
       createGameTask(
         kind,
-        readerForTarget(mission.stations, target),
+        readerForTarget(mission.stations, stationForGameTaskKind(kind)),
         now,
         dependencies,
         missionLevelProfile(level),
       ),
-    ],
+    ),
   };
+}
+
+/**
+ * Replaces the standalone task on `kind`'s station with a fresh one,
+ * leaving every other device's in-flight task untouched. Standalone
+ * play never dies to integrity, so each refresh also heals the ship.
+ */
+export function refreshStandaloneTask(
+  mission: MissionState,
+  kind: GameTaskKind,
+  now: number,
+  dependencies: MissionDependencies = DEFAULT_DEPENDENCIES,
+): void {
+  if (mission.activity.kind !== "orders") {
+    return;
+  }
+  const station = stationForGameTaskKind(kind);
+  mission.integrity = 100;
+  mission.activity.tasks = [
+    ...mission.activity.tasks.filter(
+      (task) => stationForTask(task) !== station,
+    ),
+    createGameTask(
+      kind,
+      readerForTarget(mission.stations, station),
+      now,
+      dependencies,
+      missionLevelProfile(mission.level),
+    ),
+  ];
+}
+
+/** Drops the standalone task running on `kind`'s station, if any. */
+export function removeStandaloneTask(
+  mission: MissionState,
+  kind: GameTaskKind,
+): void {
+  if (mission.activity.kind !== "orders") {
+    return;
+  }
+  const station = stationForGameTaskKind(kind);
+  mission.activity.tasks = mission.activity.tasks.filter(
+    (task) => stationForTask(task) !== station,
+  );
 }
 
 export function applyHardwareEvent(
@@ -804,7 +847,7 @@ function createGameTask(
   }
 }
 
-function stationForGameTaskKind(kind: GameTaskKind): Station {
+export function stationForGameTaskKind(kind: GameTaskKind): Station {
   switch (kind) {
     case "streamdeck-route":
     case "streamdeck-sequence":

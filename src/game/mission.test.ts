@@ -457,7 +457,7 @@ describe("activity settings and standalone launcher", () => {
 
     prepareStandaloneRound(
       mission,
-      "uf8-fader",
+      ["uf8-fader"],
       2_000,
       dependencies,
     );
