@@ -43,7 +43,7 @@ export type ActivityItem = {
 
 export type MissionRunMode =
   | { kind: "campaign" }
-  | { kind: "standalone"; game: GameTaskKind };
+  | { kind: "standalone"; games: readonly GameTaskKind[] };
 
 export type MissionPhaseView =
   | { kind: "lobby" }
@@ -173,6 +173,7 @@ export type ClientMessage =
   | { type: "push-join" }
   | { type: "start-mission" }
   | { type: "start-standalone"; game: GameTaskKind }
+  | { type: "stop-standalone"; game: GameTaskKind }
   | { type: "reset-mission" }
   | { type: "set-activity-settings"; settings: ActivitySettings }
   | { type: "hardware-event"; event: HardwareEvent }
@@ -341,6 +342,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     case "start-standalone":
       return isGameTaskKind(value["game"])
         ? { type: "start-standalone", game: value["game"] }
+        : null;
+    case "stop-standalone":
+      return isGameTaskKind(value["game"])
+        ? { type: "stop-standalone", game: value["game"] }
         : null;
     case "phone-claim":
       return typeof value.name === "string" && isStation(value.station)
@@ -619,8 +624,14 @@ function isMissionRunMode(value: unknown): value is MissionRunMode {
   switch (value.kind) {
     case "campaign":
       return true;
-    case "standalone":
-      return isGameTaskKind(value["game"]);
+    case "standalone": {
+      const games = value["games"];
+      return (
+        Array.isArray(games) &&
+        games.length > 0 &&
+        games.every(isGameTaskKind)
+      );
+    }
     default:
       return false;
   }

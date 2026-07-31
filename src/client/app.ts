@@ -34,7 +34,6 @@ import {
   type ConfigurableGameTaskKind,
   type GameTaskKind,
 } from "../game/mission.ts";
-import { MidiBridge, type MidiDeviceOption } from "./midi.ts";
 
 type SavedCrew = {
   crewId: string;
@@ -48,7 +47,6 @@ if (appElement === null) {
 const app = appElement;
 
 const isConsole = window.location.pathname === "/console";
-const midiBridge = isConsole ? new MidiBridge(sendHardware, render) : null;
 let socket: WebSocket | null = null;
 let snapshot: ViewSnapshot | null = null;
 let errorMessage = "";
@@ -438,12 +436,6 @@ function renderConsole(): void {
     `;
     return;
   }
-  midiBridge?.syncActivity(
-    snapshot.mission?.activity ?? null,
-    snapshot.phase.kind === "playing"
-      ? snapshot.phase.activeControls.pushGridSize
-      : 0,
-  );
   app.innerHTML = consoleMarkup(snapshot);
   bindConsoleActions(snapshot);
 }
@@ -566,11 +558,11 @@ function gameSettingsMarkup(consoleSnapshot: ConsoleSnapshot): string {
 }
 
 function quickPlayMarkup(consoleSnapshot: ConsoleSnapshot): string {
-  const activeGame =
+  const activeGames =
     consoleSnapshot.phase.kind === "playing" &&
     consoleSnapshot.phase.runMode.kind === "standalone"
-      ? consoleSnapshot.phase.runMode.game
-      : null;
+      ? consoleSnapshot.phase.runMode.games
+      : [];
   return `
     <section class="quick-play-panel">
       <div class="panel-heading">
@@ -578,23 +570,25 @@ function quickPlayMarkup(consoleSnapshot: ConsoleSnapshot): string {
           <div class="eyebrow">NO PHONE REQUIRED</div>
           <h2>Quick play</h2>
         </div>
-        <p>Launch one game directly. Its full instruction stays on this console and a fresh round starts after every clear or timeout.</p>
+        <p>Launch games directly — one per device, side by side. Full instructions stay on this console and each game rolls a fresh round after every clear or timeout. Press a running game to stop it.</p>
       </div>
       <div class="quick-play-grid">
         ${GAME_TASK_KINDS.map(
           (kind) => {
             const info = GAME_INFO[kind];
+            const active = activeGames.includes(kind);
             return `
           <button
-            class="quick-play-game station-${info.station} ${activeGame === kind ? "is-active" : ""}"
+            class="quick-play-game station-${info.station} ${active ? "is-active" : ""}"
             data-quick-play="${kind}"
+            ${active ? 'data-quick-play-active="true"' : ""}
           >
             <span class="station-indicator"></span>
             <span>
               <strong>${info.name}</strong>
               <small>${stationShortName(info.station)}</small>
             </span>
-            <i>${activeGame === kind ? "RUNNING" : "PLAY"}</i>
+            <i>${active ? "STOP" : "PLAY"}</i>
           </button>
         `;
           },
@@ -705,7 +699,7 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
       }
       const standaloneGame =
         consoleSnapshot.phase.runMode.kind === "standalone"
-          ? consoleSnapshot.phase.runMode.game
+          ? consoleSnapshot.phase.runMode.games
           : null;
       return `
         <section class="console-mission ${standaloneGame !== null ? "mode-standalone" : "mode-campaign"}">
@@ -727,7 +721,7 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
               </div>
               <p>${
                 standaloneGame !== null
-                  ? "The selected device works immediately. No phone assignment or countdown is required."
+                  ? "The selected devices work immediately. No phone assignment or countdown is required."
                   : "Real adapters use the same typed events. These controls disappear from the production run screen."
               }</p>
             </div>
@@ -751,18 +745,22 @@ function consolePhaseMarkup(consoleSnapshot: ConsoleSnapshot): string {
 }
 
 function standaloneHeaderMarkup(
-  game: GameTaskKind,
+  games: readonly GameTaskKind[],
   score: number,
   combo: number,
 ): string {
-  const info = GAME_INFO[game];
+  const infos = games.map((game) => GAME_INFO[game]);
+  const first = infos[0];
+  if (first === undefined) {
+    throw new Error("Standalone header rendered without games");
+  }
   return `
-    <div class="standalone-header station-${info.station}">
+    <div class="standalone-header station-${first.station}">
       <span class="station-indicator"></span>
       <div>
-        <div class="eyebrow">QUICK PLAY · ${stationShortName(info.station)}</div>
-        <h2>${info.name}</h2>
-        <p>Instructions are shown here. The same game loops until you choose another or exit.</p>
+        <div class="eyebrow">QUICK PLAY · ${infos.map((info) => stationShortName(info.station)).join(" + ")}</div>
+        <h2>${infos.map((info) => info.name).join(" + ")}</h2>
+        <p>Instructions are shown here. Each game loops on its device until you stop it or exit.</p>
       </div>
       <div class="standalone-actions">
         <div class="standalone-stats">
@@ -1122,7 +1120,9 @@ function shouldShowStationSimulator(
     case "campaign":
       return consoleSnapshot.crew[station]?.connection.kind === "connected";
     case "standalone":
-      return GAME_INFO[consoleSnapshot.phase.runMode.game].station === station;
+      return consoleSnapshot.phase.runMode.games.some(
+        (game) => GAME_INFO[game].station === station,
+      );
   }
 }
 
@@ -1184,12 +1184,16 @@ function bindConsoleActions(consoleSnapshot: ConsoleSnapshot): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-quick-play]")) {
     button.addEventListener("click", () => {
       const game = button.dataset["quickPlay"] as GameTaskKind | undefined;
-      if (game !== undefined) {
-        send({ type: "start-standalone", game });
+      if (game === undefined) {
+        return;
       }
+      send(
+        button.dataset["quickPlayActive"] !== undefined
+          ? { type: "stop-standalone", game }
+          : { type: "start-standalone", game },
+      );
     });
   }
-  bindMidiActions();
   document.querySelector("#start-mission")?.addEventListener("click", () => {
     send({ type: "start-mission" });
   });
@@ -1259,74 +1263,18 @@ function simulatedDeckPhase(
 }
 
 function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
-  const bridge = midiBridge;
-  if (bridge === null) {
-    return "";
-  }
-  const view = bridge.view();
   const streamDeckStatus = consoleSnapshot.streamDeckConnected
     ? "CONNECTED"
     : "WAITING FOR PLUGIN";
   const pushBridgeStatus = consoleSnapshot.pushBridgeConnected
     ? "CONNECTED"
-    : "WEB MIDI OR BRIDGE";
+    : "WAITING FOR USB";
   const uf8Connected = consoleSnapshot.uf8Connection.kind === "connected";
   const uf8Status = uf8Connected ? "DIRECT LINK" : "RECONNECTING";
   const uf8Detail =
     consoleSnapshot.uf8Connection.kind === "connected"
       ? `Serial ${consoleSnapshot.uf8Connection.serial} · custom displays and 8 faders`
       : consoleSnapshot.uf8Connection.message;
-  let midiContent = "";
-  switch (view.status) {
-    case "unsupported":
-      midiContent = `
-        <div class="midi-device station-push">
-          ${pushDeviceTitle("WEB MIDI UNAVAILABLE")}
-          <p class="hardware-note">Push setup needs Chrome Web MIDI on the hardware laptop.</p>
-        </div>
-      `;
-      break;
-    case "idle":
-    case "requesting":
-      midiContent = `
-        <div class="midi-device station-push">
-          ${pushDeviceTitle("NOT CONFIGURED")}
-          <button id="enable-midi" class="secondary-button" ${view.status === "requesting" ? "disabled" : ""}>
-            ${view.status === "requesting" ? "REQUESTING MIDI…" : "ENABLE PUSH MIDI"}
-          </button>
-        </div>
-      `;
-      break;
-    case "error":
-      midiContent = `
-        <div class="midi-device station-push">
-          ${pushDeviceTitle("MIDI ERROR")}
-          <p class="hardware-note is-error">${escapeHtml(view.error)}</p>
-          <button id="enable-midi" class="secondary-button">TRY PUSH MIDI AGAIN</button>
-        </div>
-      `;
-      break;
-    case "ready":
-      midiContent = `
-        <div class="midi-device station-push">
-          ${pushDeviceTitle(view.configuration.pushGrid === null ? "GRID UNMAPPED" : "GRID READY")}
-          <label>
-            USER INPUT
-            <select id="push-midi-input">
-              ${midiOptions(view.inputs, view.configuration.pushInputId, "Select Push User input")}
-            </select>
-          </label>
-          <label>
-            USER OUTPUT
-            <select id="push-midi-output">
-              ${midiOptions(view.outputs, view.configuration.pushOutputId, "Select Push User output")}
-            </select>
-          </label>
-          <button id="learn-push" class="secondary-button">LEARN 3 GRID CORNERS</button>
-        </div>
-      `;
-      break;
-  }
   return `
     <section class="hardware-setup">
       <div class="hardware-setup-heading">
@@ -1367,82 +1315,22 @@ function hardwarePanelMarkup(consoleSnapshot: ConsoleSnapshot): string {
               .join("")}
           </div>
         </div>
-        ${midiContent}
+        <div class="midi-device station-push">
+          <div class="hardware-device-title">
+            <span class="station-indicator"></span>
+            <strong>ABLETON PUSH</strong>
+            <small>${consoleSnapshot.pushBridgeConnected ? "SERVER OWNED" : "OFFLINE"}</small>
+          </div>
+          <p class="direct-device-note ${consoleSnapshot.pushBridgeConnected ? "" : "is-error"}">
+            ${
+              consoleSnapshot.pushBridgeConnected
+                ? "Direct USB bridge · pads, buttons, dial, touch strip and display"
+                : "Connect the Push over USB — the server links it automatically"
+            }
+          </p>
+        </div>
       </div>
-      ${
-        view.learnText.length === 0
-          ? ""
-          : `
-            <div class="learn-banner">
-              <span>${escapeHtml(view.learnText)}</span>
-              <button id="cancel-midi-learn">CANCEL</button>
-            </div>
-          `
-      }
-      ${view.error.length > 0 && view.status !== "error" ? `<p class="hardware-note is-error">${escapeHtml(view.error)}</p>` : ""}
     </section>
-  `;
-}
-
-function pushDeviceTitle(status: string): string {
-  return `
-    <div class="hardware-device-title">
-      <span class="station-indicator"></span>
-      <strong>ABLETON PUSH</strong>
-      <small>${status}</small>
-    </div>
-  `;
-}
-
-function bindMidiActions(): void {
-  const bridge = midiBridge;
-  if (bridge === null) {
-    return;
-  }
-  document.querySelector("#enable-midi")?.addEventListener("click", () => {
-    void bridge.requestAccess();
-  });
-  document
-    .querySelector<HTMLSelectElement>("#push-midi-input")
-    ?.addEventListener("change", (event) => {
-      const select = event.currentTarget;
-      if (!(select instanceof HTMLSelectElement)) {
-        throw new Error("Push MIDI selection did not come from a select");
-      }
-      bridge.setPushInput(select.value.length === 0 ? null : select.value);
-    });
-  document
-    .querySelector<HTMLSelectElement>("#push-midi-output")
-    ?.addEventListener("change", (event) => {
-      const select = event.currentTarget;
-      if (!(select instanceof HTMLSelectElement)) {
-        throw new Error("Push output selection did not come from a select");
-      }
-      bridge.setPushOutput(select.value.length === 0 ? null : select.value);
-    });
-  document.querySelector("#learn-push")?.addEventListener("click", () => {
-    bridge.learnPushGrid();
-  });
-  document
-    .querySelector("#cancel-midi-learn")
-    ?.addEventListener("click", () => {
-      bridge.cancelLearn();
-    });
-}
-
-function midiOptions(
-  devices: readonly MidiDeviceOption[],
-  selectedId: string | null,
-  placeholder: string,
-): string {
-  return `
-    <option value="">${escapeHtml(placeholder)}</option>
-    ${devices
-      .map(
-        (device) =>
-          `<option value="${escapeHtml(device.id)}" ${device.id === selectedId ? "selected" : ""}>${escapeHtml(device.label)}</option>`,
-      )
-      .join("")}
   `;
 }
 

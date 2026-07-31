@@ -125,20 +125,16 @@ tagged `@somnai-dreams/ssl-uf8` package for direct hardware access.
 
 Two ways to connect the Push:
 
-**Push 3 bridge (recommended for Push 3).** A dedicated hardware client under
-`hardware/push` connects straight to the server (like the Stream Deck plugin)
-and additionally drives the Push's screen: live vector path, progress, score,
-integrity, deadlines, and a HULL BREACH flash when the ship takes damage. No
-grid learning needed. The bridge consumes the publishable
+**Push 3 bridge (recommended for Push 3).** Built into the game server, like
+the UF8 link: plug the Push in over USB and the server connects to it
+automatically (retrying every couple of seconds, so plug order doesn't
+matter). It drives the Push's screen with the live vector path, progress,
+score, integrity, deadlines, and a HULL BREACH flash when the ship takes
+damage. No grid learning needed. The bridge consumes the publishable
 [`@somnai-dreams/ableton-push`](https://github.com/somnai-dreams/ableton-push/tree/v0.1.0)
-package for direct hardware access. See
-`hardware/push/README.md`:
-
-```sh
-cd hardware/push
-bun install
-bun bridge.js
-```
+package for direct hardware access. Ableton Live (or any other app holding
+the Push display) must not be running. `/health` reports the link state
+under `push`.
 
 **Web MIDI via the console (any Push generation).**
 

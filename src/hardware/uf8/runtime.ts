@@ -98,13 +98,23 @@ export class Uf8Runtime {
   }
 
   moveFadersTo(percent: number): void {
-    const position = uf8FaderPositionFromPercent(percent);
+    this.moveFadersToValues(
+      Array.from({ length: UF8_FADER_COUNT }, () => percent),
+    );
+  }
+
+  moveFadersToValues(values: readonly number[]): void {
     const session = this.#session;
     if (session === null) {
       return;
     }
     for (let index = 0; index < UF8_FADER_COUNT; index += 1) {
-      session.write(setUf8FaderPosition(index, position));
+      session.write(
+        setUf8FaderPosition(
+          index,
+          uf8FaderPositionFromPercent(values[index] ?? 0),
+        ),
+      );
     }
     for (let index = 0; index < UF8_FADER_COUNT; index += 1) {
       session.write(setUf8FaderMotorEnabled(index, true));
@@ -121,11 +131,22 @@ export class Uf8Runtime {
     if (signature === this.#lastDisplaySignature) {
       return;
     }
+    // Every animation frame repaints each strip's content area, cue
+    // included. When only cue text changed, handing the new view to
+    // the animation is enough — the full static redraw below wipes
+    // all eight displays and reads as a flash.
+    const cueOnlyChange =
+      this.#displayView !== null &&
+      staticDisplaySignature(view) ===
+        staticDisplaySignature(this.#displayView);
+    this.#lastDisplaySignature = signature;
+    this.#displayView = view;
+    if (cueOnlyChange) {
+      return;
+    }
     for (const frame of createUf8DisplayFrames(view)) {
       session.write(frame);
     }
-    this.#lastDisplaySignature = signature;
-    this.#displayView = view;
     this.#animationFrame = 0;
     this.#nextAnimationAt = performance.now();
   }
@@ -323,6 +344,16 @@ export function createUf8DisplayFrames(
     );
   }
   return frames;
+}
+
+function staticDisplaySignature(view: Uf8DisplayView): string {
+  return JSON.stringify({
+    scene: view.scene,
+    strips: view.strips.map((strip) => ({
+      label: strip.label,
+      active: strip.active,
+    })),
+  });
 }
 
 function sameConnectionState(

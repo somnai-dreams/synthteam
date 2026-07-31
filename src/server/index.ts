@@ -5,8 +5,10 @@ import {
   applyHardwareEvent,
   createMission,
   createStandaloneMission,
+  refreshStandaloneTask,
+  removeStandaloneTask,
+  stationForGameTaskKind,
   getActivitySettings,
-  prepareStandaloneRound,
   setActivitySettings,
 } from "../game/mission.ts";
 import {
@@ -20,6 +22,7 @@ import {
   type Uf8DisplayView,
   Uf8Runtime,
 } from "../hardware/uf8/runtime.ts";
+import { PushRuntime } from "../hardware/push/runtime.ts";
 import type {
   CrewSlots,
   HardwareEvent,
@@ -30,9 +33,11 @@ import type {
   Station,
   Uf8FaderValues,
 } from "../shared/domain.ts";
+import type { Uf8FaderStop } from "../shared/domain.ts";
 import {
   missionLevelProfile,
   UF8_CONTROL_LABELS,
+  UF8_FADER_STOPS,
   UF8_ZERO_FADER_STOP,
 } from "../shared/domain.ts";
 import type {
@@ -73,6 +78,26 @@ type GameState =
       score: number;
     };
 
+declare global {
+  // bun --hot re-evaluates this module in place. The previous
+  // generation's device runtimes hold exclusive USB handles (FTDI,
+  // libusb) and would starve the new generation forever, so each
+  // generation stops the last one before opening the hardware.
+  var synthteamHotGeneration:
+    | {
+        uf8: Uf8Runtime;
+        push: PushRuntime;
+        tick: ReturnType<typeof setInterval>;
+      }
+    | undefined;
+}
+const previousGeneration = globalThis.synthteamHotGeneration;
+if (previousGeneration !== undefined) {
+  clearInterval(previousGeneration.tick);
+  void previousGeneration.uf8.stop();
+  void previousGeneration.push.stop();
+}
+
 const crew: CrewSlots = {
   streamdeck: null,
   uf8: null,
@@ -100,6 +125,7 @@ const uf8 = new Uf8Runtime({
   },
   onFader(event) {
     uf8FaderValues[event.channel] = event.value;
+    noteUf8FaderMotion(event.channel);
     if (game.kind === "playing") {
       applyGameHardwareEvent(event);
       return;
@@ -108,6 +134,53 @@ const uf8 = new Uf8Runtime({
     broadcastSnapshots();
   },
 });
+
+// Live fader feedback: while a fader is moving, its display shows the
+// nearest printed stop so the operator can land an order by eye.
+const UF8_LIVE_CUE_MS = 1_200;
+const uf8FaderTouchedAt = [0, 0, 0, 0, 0, 0, 0, 0];
+let uf8LiveCueTimer: ReturnType<typeof setTimeout> | null = null;
+
+function noteUf8FaderMotion(channel: number): void {
+  uf8FaderTouchedAt[channel] = Date.now();
+  syncUf8Display();
+  if (uf8LiveCueTimer !== null) {
+    clearTimeout(uf8LiveCueTimer);
+  }
+  uf8LiveCueTimer = setTimeout(() => {
+    uf8LiveCueTimer = null;
+    syncUf8Display();
+  }, UF8_LIVE_CUE_MS + 50);
+}
+
+// A fresh calibration game scrambles the desk first: the motors throw
+// every fader somewhere new so each round starts as a real reach.
+function scatterUf8Faders(): Uf8FaderValues {
+  const values = uf8FaderValues.map(() =>
+    Math.round(Math.random() * 100),
+  ) as Uf8FaderValues;
+  values.forEach((value, channel) => {
+    uf8FaderValues[channel] = value;
+  });
+  uf8.moveFadersToValues(values);
+  return values;
+}
+
+function syncMissionFaders(mission: { uf8Faders: Uf8FaderValues }): void {
+  uf8FaderValues.forEach((value, channel) => {
+    mission.uf8Faders[channel] = value;
+  });
+}
+
+function nearestUf8StopLabel(value: number): string {
+  let nearest: Uf8FaderStop = UF8_FADER_STOPS[0];
+  for (const stop of UF8_FADER_STOPS) {
+    if (Math.abs(value - stop.value) < Math.abs(value - nearest.value)) {
+      nearest = stop;
+    }
+  }
+  return nearest.label;
+}
 
 // Outside a mission the motorized faders snap back to the 0 DB stop
 // shortly after being moved, so the desk always rests in a known
@@ -134,7 +207,8 @@ const server = Bun.serve<SocketData>({
   routes: {
     "/": app,
     "/console": app,
-    "/health": () => Response.json({ ok: true, uf8: uf8.state }),
+    "/health": () =>
+      Response.json({ ok: true, uf8: uf8.state, push: pushBridge.state }),
   },
   fetch(request, currentServer) {
     const url = new URL(request.url);
@@ -200,6 +274,16 @@ const server = Bun.serve<SocketData>({
 
 const tickInterval = setInterval(tick, 50);
 uf8.start();
+// The Push bridge lives in this process but speaks the same
+// WebSocket protocol the external one did, so the game sees an
+// ordinary push-join hardware client.
+const pushBridge = new PushRuntime(`ws://127.0.0.1:${server.port}/ws`);
+pushBridge.start();
+globalThis.synthteamHotGeneration = {
+  uf8,
+  push: pushBridge,
+  tick: tickInterval,
+};
 
 process.once("SIGINT", () => {
   void shutdown();
@@ -213,6 +297,7 @@ for (const url of phoneUrls) {
   console.log(`Phone URL: ${url}`);
 }
 console.log(`Hardware console: http://localhost:${server.port}/console`);
+console.log("Push 3: joins automatically when connected over USB");
 
 function handleMessage(
   socket: Bun.ServerWebSocket<SocketData>,
@@ -248,17 +333,60 @@ function handleMessage(
     case "start-standalone":
       if (requireConsole(socket)) {
         const now = Date.now();
-        game = {
-          kind: "playing",
-          runMode: { kind: "standalone", game: message.game },
-          mission: createStandaloneMission(
-            message.game,
-            now,
-            undefined,
-            [...uf8FaderValues],
-          ),
-        };
+        if (message.game === "uf8-fader") {
+          scatterUf8Faders();
+        }
+        if (game.kind === "playing" && game.runMode.kind === "standalone") {
+          // Each device runs one game at a time, but different
+          // devices play side by side: starting a game replaces only
+          // its own station's slot.
+          const station = stationForGameTaskKind(message.game);
+          game.runMode = {
+            kind: "standalone",
+            games: [
+              ...game.runMode.games.filter(
+                (existing) => stationForGameTaskKind(existing) !== station,
+              ),
+              message.game,
+            ],
+          };
+          if (message.game === "uf8-fader") {
+            syncMissionFaders(game.mission);
+          }
+          refreshStandaloneTask(game.mission, message.game, now);
+        } else {
+          game = {
+            kind: "playing",
+            runMode: { kind: "standalone", games: [message.game] },
+            mission: createStandaloneMission(
+              message.game,
+              now,
+              undefined,
+              [...uf8FaderValues],
+            ),
+          };
+        }
         addActivity(`Quick play · ${message.game}`, "success");
+        broadcastSnapshots();
+      }
+      return;
+    case "stop-standalone":
+      if (
+        requireConsole(socket) &&
+        game.kind === "playing" &&
+        game.runMode.kind === "standalone"
+      ) {
+        const games = game.runMode.games.filter(
+          (existing) => existing !== message.game,
+        );
+        if (games.length === 0) {
+          game = { kind: "lobby" };
+          addActivity("Quick play ended", "neutral");
+        } else {
+          game.runMode = { kind: "standalone", games };
+          removeStandaloneTask(game.mission, message.game);
+          addActivity(`Quick play stopped · ${message.game}`, "neutral");
+        }
         broadcastSnapshots();
       }
       return;
@@ -460,11 +588,28 @@ function continueStandaloneIfNeeded(
   if (!roundEnded) {
     return outcomes;
   }
-  prepareStandaloneRound(
-    game.mission,
-    game.runMode.game,
-    now,
+  // Refresh only the stations whose round actually ended; the other
+  // devices keep their in-flight tasks.
+  const endedStations = new Set(
+    outcomes.flatMap((outcome) =>
+      outcome.kind === "completed" || outcome.kind === "expired"
+        ? [outcome.target]
+        : [],
+    ),
   );
+  for (const kind of game.runMode.games) {
+    if (!endedStations.has(stationForGameTaskKind(kind))) {
+      continue;
+    }
+    if (kind === "uf8-fader") {
+      scatterUf8Faders();
+      syncMissionFaders(game.mission);
+    }
+    refreshStandaloneTask(game.mission, kind, now);
+  }
+  // Standalone play never game-overs; integrity damage heals between
+  // rounds even when no station rolled a fresh task.
+  game.mission.integrity = 100;
   return outcomes.filter((outcome) => outcome.kind !== "mission-ended");
 }
 
@@ -659,6 +804,23 @@ function syncUf8Display(): void {
       }
     }
   }
+  const now = Date.now();
+  uf8FaderTouchedAt.forEach((touchedAt, channel) => {
+    const strip = view.strips[channel];
+    if (
+      strip === undefined ||
+      !strip.active ||
+      now - touchedAt >= UF8_LIVE_CUE_MS
+    ) {
+      return;
+    }
+    // The live reading outranks any game cue on a strip the operator
+    // is actively riding — that is the moment the number matters.
+    strip.cue = {
+      heading: "FADER",
+      value: nearestUf8StopLabel(uf8FaderValues[channel] ?? 0),
+    };
+  });
   uf8.render(view);
 }
 
@@ -899,6 +1061,7 @@ async function shutdown(): Promise<void> {
   }
   shuttingDown = true;
   clearInterval(tickInterval);
+  await pushBridge.stop();
   await server.stop(true);
   await uf8.stop();
 }
