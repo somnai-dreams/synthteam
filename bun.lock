@@ -5,6 +5,7 @@
     "": {
       "name": "synthteam",
       "dependencies": {
+        "@somnai-dreams/ableton-push": "git+https://github.com/somnai-dreams/ableton-push.git#v0.1.0",
         "@somnai-dreams/ssl-uf8": "git+https://github.com/somnai-dreams/ssl-uf8.git#v0.1.0",
       },
       "devDependencies": {
@@ -13,12 +14,6 @@
         "oxlint": "latest",
         "oxlint-tsgolint": "latest",
         "typescript": "5.9.3",
-      },
-    },
-    "hardware/push": {
-      "name": "synthteam-push-bridge",
-      "dependencies": {
-        "@somnai-dreams/ableton-push": "git+https://github.com/somnai-dreams/ableton-push.git#v0.1.0",
       },
     },
   },
@@ -142,8 +137,6 @@
     "oxlint-tsgolint": ["oxlint-tsgolint@7.0.2001", "", { "optionalDependencies": { "@oxlint-tsgolint/darwin-arm64": "7.0.2001", "@oxlint-tsgolint/darwin-x64": "7.0.2001", "@oxlint-tsgolint/linux-arm64": "7.0.2001", "@oxlint-tsgolint/linux-x64": "7.0.2001", "@oxlint-tsgolint/win32-arm64": "7.0.2001", "@oxlint-tsgolint/win32-x64": "7.0.2001" }, "bin": { "tsgolint": "./bin/tsgolint.js" } }, "sha512-KjK/XLcXr1DSyonKhsuFqJRiuKqcyG9j3LJ8nkOsrLzGvodBPqzHOKauy10asLMDI0sUpvb+1sxlzff3udZvfg=="],
 
     "pkg-prebuilds": ["pkg-prebuilds@1.1.0", "", { "bin": { "pkg-prebuilds-copy": "bin/copy.mjs", "pkg-prebuilds-verify": "bin/verify.mjs" } }, "sha512-jyai+KTQ2OwbN6iRYw88XbYOMgtpoSYJpjYebx7d9ihqz3txNi3ucsBt3va0iVWe6svSlaqpijMHFF/eJCMZzg=="],
-
-    "synthteam-push-bridge": ["synthteam-push-bridge@workspace:hardware/push"],
 
     "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 

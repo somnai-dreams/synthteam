@@ -2,9 +2,6 @@
   "name": "synthteam",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "hardware/push"
-  ],
   "scripts": {
     "build": "bun run build:app && bun run build:streamdeck",
     "build:app": "bun build --target=bun --outdir=dist src/server/index.ts",
@@ -17,6 +14,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@somnai-dreams/ableton-push": "git+https://github.com/somnai-dreams/ableton-push.git#v0.1.0",
     "@somnai-dreams/ssl-uf8": "git+https://github.com/somnai-dreams/ssl-uf8.git#v0.1.0"
   },
   "devDependencies": {
@@ -25,5 +23,9 @@
     "oxlint": "latest",
     "oxlint-tsgolint": "latest",
     "typescript": "5.9.3"
-  }
+  },
+  "trustedDependencies": [
+    "@julusian/midi",
+    "usb"
+  ]
 }

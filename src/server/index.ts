@@ -20,6 +20,7 @@ import {
   type Uf8DisplayView,
   Uf8Runtime,
 } from "../hardware/uf8/runtime.ts";
+import { PushRuntime } from "../hardware/push/runtime.ts";
 import type {
   CrewSlots,
   HardwareEvent,
@@ -134,7 +135,8 @@ const server = Bun.serve<SocketData>({
   routes: {
     "/": app,
     "/console": app,
-    "/health": () => Response.json({ ok: true, uf8: uf8.state }),
+    "/health": () =>
+      Response.json({ ok: true, uf8: uf8.state, push: pushBridge.state }),
   },
   fetch(request, currentServer) {
     const url = new URL(request.url);
@@ -200,6 +202,11 @@ const server = Bun.serve<SocketData>({
 
 const tickInterval = setInterval(tick, 50);
 uf8.start();
+// The Push bridge lives in this process but speaks the same
+// WebSocket protocol the external one did, so the game sees an
+// ordinary push-join hardware client.
+const pushBridge = new PushRuntime(`ws://127.0.0.1:${server.port}/ws`);
+pushBridge.start();
 
 process.once("SIGINT", () => {
   void shutdown();
@@ -213,6 +220,7 @@ for (const url of phoneUrls) {
   console.log(`Phone URL: ${url}`);
 }
 console.log(`Hardware console: http://localhost:${server.port}/console`);
+console.log("Push 3: joins automatically when connected over USB");
 
 function handleMessage(
   socket: Bun.ServerWebSocket<SocketData>,
@@ -899,6 +907,7 @@ async function shutdown(): Promise<void> {
   }
   shuttingDown = true;
   clearInterval(tickInterval);
+  await pushBridge.stop();
   await server.stop(true);
   await uf8.stop();
 }
